@@ -216,7 +216,7 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   const c_hash: Bytes<32> = persistentHash<ChallengeInput>(c_bytes);
   const c_bytes15: Bytes<15> = slice<15>(c_hash, 0);
   const c_field: Field = c_bytes15 as Field;
-  assert(false, "Debug: Reached challenge computation");
+  //assert(false, "Debug: Reached challenge computation");
   //assert(c_field != 0, "Challenge cannot be zero");
   
   // Step 3: Skip the elliptic curve operations for now - these are likely the problem
