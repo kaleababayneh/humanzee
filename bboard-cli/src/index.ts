@@ -35,8 +35,9 @@ import {
   type DeployedBBoardContract,
   type PrivateStateId,
   bboardPrivateStateKey,
+  type BBoardCircuitKeys,
 } from '../../api/src/index';
-import { ledger, type Ledger, State } from '../../contract/src/managed/bboard/contract/index.cjs';
+import { ledger, type Ledger } from '../../contract/src/managed/bboard/contract/index.cjs';
 import {
   type BalancedTransaction,
   createBalancedTx,
@@ -80,9 +81,6 @@ export const getBBoardLedgerState = async (
   const contractState = await providers.publicDataProvider.queryContractState(contractAddress);
   return contractState != null ? ledger(contractState.data) : null;
 };
-// providers.publicDataProvider
-//   .queryContractState(contractAddress)
-//   .then((contractState) => (contractState != null ? ledger(contractState.data) : null));
 
 /* **********************************************************************
  * deployOrJoin: returns a contract, by prompting the user about
@@ -135,12 +133,27 @@ const displayLedgerState = async (
   if (ledgerState === null) {
     logger.info(`There is no bulletin board contract deployed at ${contractAddress}`);
   } else {
-    const boardState = ledgerState.state === State.OCCUPIED ? 'occupied' : 'vacant';
-    const latestMessage = !ledgerState.message.is_some ? 'none' : ledgerState.message.value;
-    logger.info(`Current state is: '${boardState}'`);
-    logger.info(`Current message is: '${latestMessage}'`);
     logger.info(`Current sequence is: ${ledgerState.sequence}`);
-    logger.info(`Current owner is: '${toHex(ledgerState.owner)}'`);
+    logger.info(`Authority public key: x=${ledgerState.authority_pk.x}, y=${ledgerState.authority_pk.y}`);
+    
+    // Display posts
+    const posts = Array.from(ledgerState.posts);
+    logger.info(`Total posts: ${posts.length}`);
+    
+    if (posts.length > 0) {
+      logger.info('Recent posts (newest first):');
+      posts.slice(0, 5).forEach((post, index) => {
+        logger.info(`  ${index + 1}. "${post.message}" by ${toHex(post.user_hash).slice(0, 8)}... (ID: ${post.id})`);
+      });
+      
+      if (posts.length > 5) {
+        logger.info(`  ... and ${posts.length - 5} more posts`);
+      }
+    }
+    
+    // Display authors
+    const authorsArray = Array.from(ledgerState.authors);
+    logger.info(`Total unique authors: ${authorsArray.length}`);
   }
 };
 
@@ -168,12 +181,19 @@ const displayDerivedState = (ledgerState: BBoardDerivedState | undefined, logger
   if (ledgerState === undefined) {
     logger.info(`No bulletin board state currently available`);
   } else {
-    const boardState = ledgerState.state === State.OCCUPIED ? 'occupied' : 'vacant';
-    const latestMessage = ledgerState.state === State.OCCUPIED ? ledgerState.message : 'none';
-    logger.info(`Current state is: '${boardState}'`);
-    logger.info(`Current message is: '${latestMessage}'`);
     logger.info(`Current sequence is: ${ledgerState.sequence}`);
-    logger.info(`Current owner is: '${ledgerState.isOwner ? 'you' : 'not you'}'`);
+    logger.info(`Total posts: ${ledgerState.postCount}`);
+    logger.info(`Total authors: ${ledgerState.authorCount}`);
+    logger.info(`You are ${ledgerState.isAuthority ? 'the authority' : 'not the authority'}`);
+    
+    if (ledgerState.posts.length > 0) {
+      logger.info('Recent posts:');
+      ledgerState.posts.slice(0, 3).forEach((post, index) => {
+        logger.info(`  ${index + 1}. "${post.message}" (ID: ${post.id})`);
+      });
+    } else {
+      logger.info('No posts yet');
+    }
   }
 };
 
@@ -185,11 +205,11 @@ const displayDerivedState = (ledgerState: BBoardDerivedState | undefined, logger
 
 const MAIN_LOOP_QUESTION = `
 You can do one of the following:
-  1. Post a message
-  2. Take down your message
-  3. Display the current ledger state (known by everyone)
-  4. Display the current private state (known only to this DApp instance)
-  5. Display the current derived state (known only to this DApp instance)
+  1. Post a message (with automatic credential)
+  2. Display the current ledger state (known by everyone)
+  3. Display the current private state (known only to this DApp instance)
+  4. Display the current derived state (known only to this DApp instance)
+  5. View all posts
   6. Exit
 Which would you like to do? `;
 
@@ -209,21 +229,68 @@ const mainLoop = async (providers: BBoardProviders, rli: Interface, logger: Logg
       switch (choice) {
         case '1': {
           const message = await rli.question(`What message do you want to post? `);
-          await bboardApi.post(message);
+          const userIdentity = await rli.question(`Enter user identity (e.g., user@example.com): `);
+          const authorName = await rli.question(`Enter author display name: `);
+          
+          logger.info(`📝 Posting message: "${message}"`);
+          logger.info(`👤 User identity: ${userIdentity}`);
+          logger.info(`✍️  Author name: ${authorName}`);
+          
+          try {
+            logger.info(`🔐 Creating authority credential for user...`);
+            await bboardApi.authorizeAndPost(userIdentity, message, authorName);
+            logger.info('✅ Message posted successfully!');
+          } catch (error) {
+            logger.error(`❌ Failed to post message:`);
+            if (error instanceof Error) {
+              logger.error(`   Error: ${error.message}`);
+              if (error.stack) {
+                logger.debug(`   Stack trace: ${error.stack}`);
+              }
+              
+              // Parse proof server errors for more details
+              if (error.message.includes('Failed Proof Server response')) {
+                logger.error(`🚫 Proof Server Error Details:`);
+                logger.error(`   This typically means the proof generation failed`);
+                logger.error(`   Common causes:`);
+                logger.error(`   - Circuit compilation issues`);
+                logger.error(`   - Invalid witness data`);
+                logger.error(`   - Signature verification failures`);
+                logger.error(`   - Constraint violations in the circuit`);
+                logger.error(`   - Missing or incorrect contract state`);
+                
+                // Check if it's a 400 Bad Request
+                if (error.message.includes('code="400"')) {
+                  logger.error(`   HTTP 400 suggests malformed request or circuit error`);
+                }
+              }
+            } else {
+              logger.error(`   Unknown error type: ${error}`);
+            }
+          }
           break;
         }
         case '2':
-          await bboardApi.takeDown();
-          break;
-        case '3':
           await displayLedgerState(providers, bboardApi.deployedContract, logger);
           break;
-        case '4':
+        case '3':
           await displayPrivateState(providers, logger);
           break;
-        case '5':
+        case '4':
           displayDerivedState(currentState, logger);
           break;
+        case '5': {
+          const posts = bboardApi.getPosts();
+          if (posts.length === 0) {
+            logger.info('No posts available');
+          } else {
+            logger.info(`All posts (${posts.length} total):`);
+            posts.forEach((post, index) => {
+              logger.info(`${index + 1}. "${post.message}" by ${toHex(post.user_hash).slice(0, 8)}... (ID: ${post.id}, Time: ${post.timestamp})`);
+            });
+          }
+          break;
+        }
         case '6':
           logger.info('Exiting...');
           return;
@@ -416,7 +483,7 @@ export const run = async (config: Config, logger: Logger, dockerEnv?: DockerComp
           privateStateStoreName: config.privateStateStoreName,
         }),
         publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),
-        zkConfigProvider: new NodeZkConfigProvider<'post' | 'takeDown'>(config.zkConfigPath),
+        zkConfigProvider: new NodeZkConfigProvider<BBoardCircuitKeys>(config.zkConfigPath),
         proofProvider: httpClientProofProvider(config.proofServer),
         walletProvider: walletAndMidnightProvider,
         midnightProvider: walletAndMidnightProvider,

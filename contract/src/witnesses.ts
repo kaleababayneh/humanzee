@@ -31,10 +31,12 @@ import { WitnessContext } from "@midnight-ntwrk/compact-runtime";
 
 export type BBoardPrivateState = {
   readonly secretKey: Uint8Array;
+  readonly signingNonce?: Uint8Array;
 };
 
-export const createBBoardPrivateState = (secretKey: Uint8Array) => ({
+export const createBBoardPrivateState = (secretKey: Uint8Array, signingNonce?: Uint8Array) => ({
   secretKey,
+  signingNonce,
 });
 
 /* **********************************************************************
@@ -70,5 +72,17 @@ export const witnesses = {
   }: WitnessContext<Ledger, BBoardPrivateState>): [
     BBoardPrivateState,
     Uint8Array,
-  ] => [privateState, privateState.secretKey],
+  ] => [privateState, privateState.secretKey], // Return the actual secret key from private state
+  
+  signingNonce: ({
+    privateState,
+  }: WitnessContext<Ledger, BBoardPrivateState>): [
+    BBoardPrivateState,
+    Uint8Array,
+  ] => {
+    // Generate a random nonce for each signature to prevent replay attacks
+    const randomNonce = new Uint8Array(32);
+    crypto.getRandomValues(randomNonce);
+    return [privateState, randomNonce];
+  },
 };

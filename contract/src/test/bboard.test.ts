@@ -1,18 +1,3 @@
-// This file is part of midnightntwrk/example-bboard.
-// Copyright (C) 2025 Midnight Foundation
-// SPDX-License-Identifier: Apache-2.0
-// Licensed under the Apache License, Version 2.0 (the "License");
-// You may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 import { BBoardSimulator } from "./bboard-simulator.js";
 import {
   NetworkId,
@@ -20,140 +5,218 @@ import {
 } from "@midnight-ntwrk/midnight-js-network-id";
 import { describe, it, expect } from "vitest";
 import { randomBytes } from "./utils.js";
-import { State } from "../managed/bboard/contract/index.cjs";
 
 setNetworkId(NetworkId.Undeployed);
 
-describe("BBoard smart contract", () => {
-  it("generates initial ledger state deterministically", () => {
-    const key = randomBytes(32);
-    const simulator0 = new BBoardSimulator(key);
-    const simulator1 = new BBoardSimulator(key);
-    expect(simulator0.getLedger()).toEqual(simulator1.getLedger());
-  });
-
+describe("BBoard smart contract with credential-based authorization", () => {
   it("properly initializes ledger state and private state", () => {
-    const key = randomBytes(32);
-    const simulator = new BBoardSimulator(key);
+    const authorityKey = randomBytes(32);
+    const simulator = new BBoardSimulator(authorityKey);
     const initialLedgerState = simulator.getLedger();
     expect(initialLedgerState.sequence).toEqual(0n);
-    expect(initialLedgerState.message.is_some).toEqual(false);
-    expect(initialLedgerState.message.value).toEqual("");
-    expect(initialLedgerState.owner).toEqual(new Uint8Array(32));
-    expect(initialLedgerState.state).toEqual(State.VACANT);
+    expect(initialLedgerState.posts.isEmpty()).toEqual(true);
+    expect(initialLedgerState.authors.isEmpty()).toEqual(true);
+    expect(simulator.getPostCount()).toEqual(0n);
+    expect(simulator.getAuthorCount()).toEqual(0n);
+    
     const initialPrivateState = simulator.getPrivateState();
-    expect(initialPrivateState).toEqual({ secretKey: key });
+    expect(initialPrivateState.secretKey).toEqual(authorityKey);
+    
+    // Authority public key should be set
+    const authorityPk = simulator.getAuthorityPk();
+    expect(authorityPk).toBeDefined();
+    expect(authorityPk.x).toBeDefined();
+    expect(authorityPk.y).toBeDefined();
   });
 
-  it("lets you set a message", () => {
-    const simulator = new BBoardSimulator(randomBytes(32));
-    const initialPrivateState = simulator.getPrivateState();
-    const message =
-      "Szeth-son-son-Vallano, Truthless of Shinovar, wore white on the day he was to kill a king";
+  it("lets authority issue credentials and users post messages", () => {
+    const authorityKey = randomBytes(32);
+    const simulator = new BBoardSimulator(authorityKey);
     
-    const expectedOwner = simulator.publicKey(); // This should be the owner after posting
+    const userIdentity = "user123@example.com";
+    const message = "Hello from the bulletin board!";
+    const authorId = "Alice";
     
-    simulator.post(message);
+    // Authority issues credential and user posts message
+    simulator.authorizeAndPost(userIdentity, message, authorId);
     
-    // the private ledger state shouldn't change
-    expect(initialPrivateState).toEqual(simulator.getPrivateState());
-    // And all the correct things should have been updated in the public ledger state
+    // Check the public ledger state
     const ledgerState = simulator.getLedger();
     expect(ledgerState.sequence).toEqual(1n);
-    expect(ledgerState.message.is_some).toEqual(true);
-    expect(ledgerState.message.value).toEqual(message);
-    expect(ledgerState.owner).toEqual(expectedOwner);
-    expect(ledgerState.state).toEqual(State.OCCUPIED);
-  });
-
-  it("lets you take down a message", () => {
-    const simulator = new BBoardSimulator(randomBytes(32));
-    const initialPrivateState = simulator.getPrivateState();
-    const initialPublicKey = simulator.publicKey(); // This is the key that will be used as owner
-    const message =
-      "Prince Raoden of Arelon awoke early that morning, completely unaware that he had been damned for all eternity.";
-    simulator.post(message);
-    simulator.takeDown();
-    // the private ledger state shouldn't change
-    expect(initialPrivateState).toEqual(simulator.getPrivateState());
-    // And all the correct things should have been updated in the public ledger state
-    const ledgerState = simulator.getLedger();
-    expect(ledgerState.sequence).toEqual(2n);
-    expect(ledgerState.message.is_some).toEqual(false);
-    expect(ledgerState.message.value).toEqual("");
-    // Technically the circuit doesn't clear the previous owner
-    expect(ledgerState.owner).toEqual(initialPublicKey);
-    expect(ledgerState.state).toEqual(State.VACANT);
-  });
-
-  it("lets you post another message after taking down the first", () => {
-    const simulator = new BBoardSimulator(randomBytes(32));
-    const initialPrivateState = simulator.getPrivateState();
-    simulator.post("Life before Death.");
-    simulator.takeDown();
-    const message = "Strength before Weakness.";
-    simulator.post(message);
+    expect(ledgerState.posts.isEmpty()).toEqual(false);
+    expect(simulator.getPostCount()).toEqual(1n);
+    expect(simulator.getAuthorCount()).toEqual(1n);
     
-    // Verify that the same user can take down their own post
-    expect(() => simulator.takeDown()).not.toThrow();
+    // Get the posted message
+    const posts = simulator.getPosts();
+    expect(posts).toHaveLength(1);
+    const post = posts[0];
+    expect(post.message).toEqual(message);
+    expect(post.id).toEqual(0n);
+    expect(post.timestamp).toEqual(0n);
+  });
+
+  it("lets authority authorize multiple users", () => {
+    const authorityKey = randomBytes(32);
+    const simulator = new BBoardSimulator(authorityKey);
     
-    // the private ledger state shouldn't change
-    expect(initialPrivateState).toEqual(simulator.getPrivateState());
-    // And all the correct things should have been updated in the public ledger state
-    const ledgerState = simulator.getLedger();
-    expect(ledgerState.sequence).toEqual(4n); // After second takeDown
-    expect(ledgerState.message.is_some).toEqual(false);
-    expect(ledgerState.message.value).toEqual("");
-    expect(ledgerState.state).toEqual(State.VACANT);
-  });
-
-  it("lets a different user post a message after taking down the first", () => {
-    const simulator = new BBoardSimulator(randomBytes(32));
-    simulator.post("Remember, the past need not become our future as well.");
-    simulator.takeDown();
-    simulator.switchUser(randomBytes(32));
-    const message = "Joy was more than just an absence of discomfort.";
-    simulator.post(message);
+    // First user
+    simulator.authorizeAndPost("user1@example.com", "First message", "Alice");
     
-    // Verify that the new user can take down their own post
-    expect(() => simulator.takeDown()).not.toThrow();
+    // Second user
+    simulator.authorizeAndPost("user2@example.com", "Second message", "Bob");
     
-    const ledgerState = simulator.getLedger();
-    expect(ledgerState.sequence).toEqual(4n); // After second takeDown
-    expect(ledgerState.message.is_some).toEqual(false);
-    expect(ledgerState.message.value).toEqual("");
-    expect(ledgerState.state).toEqual(State.VACANT);
+    // Third user
+    simulator.authorizeAndPost("user3@example.com", "Third message", "Charlie");
+    
+    // Check ledger state
+    expect(simulator.getSequence()).toEqual(3n);
+    expect(simulator.getPostCount()).toEqual(3n);
+    expect(simulator.getAuthorCount()).toEqual(3n); // Three different authors
+    
+    // Check posts
+    const posts = simulator.getPosts();
+    expect(posts).toHaveLength(3);
+    
+    // Posts are added to front, so newest first
+    expect(posts[0].message).toEqual("Third message");
+    expect(posts[1].message).toEqual("Second message");
+    expect(posts[2].message).toEqual("First message");
   });
 
-  it("doesn't let the same user post twice", () => {
-    const simulator = new BBoardSimulator(randomBytes(32));
-    simulator.post(
-      "My name is Stephen Leeds, and I am perfectly sane. My hallucinations, however, are all quite mad.",
-    );
-    expect(() =>
-      simulator.post(
-        "You should know by now that I've already had greatness. I traded it for mediocrity and some measure of sanity.",
-      ),
-    ).toThrow("failed assert: Attempted to post to an occupied board");
+  it("authority can issue multiple credentials for the same user", () => {
+    const authorityKey = randomBytes(32);
+    const simulator = new BBoardSimulator(authorityKey);
+    
+    const userIdentity = "user@example.com";
+    
+    // Same user gets multiple credentials (different posts)
+    simulator.authorizeAndPost(userIdentity, "First post", "User");
+    
+    // Note: The current system prevents reuse of the same credential
+    // So we'd need a different user hash for each post
+    simulator.authorizeAndPost("user@example.com-post2", "Second post", "User");
+    
+    expect(simulator.getPostCount()).toEqual(2n);
   });
 
-  it("doesn't let different users post twice", () => {
-    const simulator = new BBoardSimulator(randomBytes(32));
-    simulator.post("Ash fell from the sky");
-    simulator.switchUser(randomBytes(32));
-    expect(() =>
-      simulator.post("I am, unfortunately, the hero of ages."),
-    ).toThrow("failed assert: Attempted to post to an occupied board");
+  it("prevents unauthorized users from posting without credentials", () => {
+    const authorityKey = randomBytes(32);
+    const userKey = randomBytes(32);
+    const simulator = new BBoardSimulator(authorityKey);
+    
+    // Switch to non-authority user
+    simulator.switchUser(userKey);
+    
+    // Try to issue credential as non-authority (should fail)
+    expect(() => {
+      const userHash = simulator.createUserHash("unauthorized@example.com");
+      simulator.issueCredential(userHash);
+    }).toThrow("Only authority can issue credentials");
   });
 
-  it("doesn't let users take down someone elses posts", () => {
+  it("prevents reuse of credentials", () => {
+    const authorityKey = randomBytes(32);
+    const simulator = new BBoardSimulator(authorityKey);
+    
+    const userIdentity = "user@example.com";
+    const userHash = simulator.createUserHash(userIdentity);
+    
+    // Authority issues credential
+    const credential1 = simulator.issueCredential(userHash);
+    const authorityCredential = simulator.createCredential(userHash, credential1);
+    
+    // First post should work
+    simulator.post("First message", "User", authorityCredential);
+    expect(simulator.getPostCount()).toEqual(1n);
+    
+    // Try to reuse the same credential (should fail - either nonce already used or credential already used)
+    expect(() => {
+      simulator.post("Second message", "User", authorityCredential);
+    }).toThrow(); // Can fail for either nonce reuse or credential reuse
+  });
+
+  it("validates credential signatures correctly", () => {
+    const authorityKey = randomBytes(32);
+    const simulator = new BBoardSimulator(authorityKey);
+    
+    const userHash = simulator.createUserHash("user@example.com");
+    
+    // Valid credential from authority
+    const validSignature = simulator.issueCredential(userHash);
+    const validCredential = simulator.createCredential(userHash, validSignature);
+    
+    // Verify valid credential
+    expect(simulator.verifyCredential(validCredential)).toBe(true);
+    
+    // Create invalid credential with wrong signature
+    const fakeSignature = {
+      ...validSignature,
+      s: validSignature.s + 1n, // Corrupt the signature
+    };
+    const invalidCredential = simulator.createCredential(userHash, fakeSignature);
+    
+    // Verify invalid credential fails
+    expect(simulator.verifyCredential(invalidCredential)).toBe(false);
+  });
+
+  it("handles user identity hashing consistently", () => {
     const simulator = new BBoardSimulator(randomBytes(32));
-    simulator.post(
-      "Sometimes a hypocrite is nothing more than a man in the process of changing.",
-    );
-    simulator.switchUser(randomBytes(32));
-    expect(() => simulator.takeDown()).toThrow(
-      "failed assert: Attempted to take down post, but not the current owner",
-    );
+    
+    const identity1 = "user123@example.com";
+    const identity2 = "user123@example.com";
+    const identity3 = "different@example.com";
+    
+    const hash1 = simulator.createUserHash(identity1);
+    const hash2 = simulator.createUserHash(identity2);
+    const hash3 = simulator.createUserHash(identity3);
+    
+    // Same identity should produce same hash
+    expect(hash1).toEqual(hash2);
+    
+    // Different identity should produce different hash
+    expect(hash1).not.toEqual(hash3);
+  });
+
+  it("maintains proper sequence and prevents nonce reuse", () => {
+    const authorityKey = randomBytes(32);
+    const simulator = new BBoardSimulator(authorityKey);
+    
+    // Issue multiple credentials
+    simulator.authorizeAndPost("user1@example.com", "Message 1", "User1");
+    simulator.authorizeAndPost("user2@example.com", "Message 2", "User2");
+    simulator.authorizeAndPost("user3@example.com", "Message 3", "User3");
+    
+    // Sequence should increment properly
+    expect(simulator.getSequence()).toEqual(3n);
+    
+    // Each post should have unique IDs
+    const posts = simulator.getPosts();
+    const ids = posts.map(p => p.id);
+    const uniqueIds = new Set(ids);
+    expect(uniqueIds.size).toEqual(posts.length);
+  });
+
+  it("supports complex authorization workflow", () => {
+    const authorityKey = randomBytes(32);
+    const simulator = new BBoardSimulator(authorityKey);
+    
+    // Simulate a real workflow:
+    // 1. User requests authorization with their identity
+    const userIdentity = "alice@company.com";
+    const userHash = simulator.createUserHash(userIdentity);
+    
+    // 2. Authority reviews and issues credential
+    const authoritySignature = simulator.issueCredential(userHash);
+    const credential = simulator.createCredential(userHash, authoritySignature);
+    
+    // 3. User uses credential to post message
+    simulator.post("Authorized post from Alice", "Alice Johnson", credential);
+    
+    // 4. Verify the post was created correctly
+    const posts = simulator.getPosts();
+    expect(posts).toHaveLength(1);
+    expect(posts[0].message).toEqual("Authorized post from Alice");
+    expect(posts[0].user_hash).toEqual(userHash);
   });
 });

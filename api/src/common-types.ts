@@ -21,7 +21,7 @@
 
 import { type MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
 import { type FoundContract } from '@midnight-ntwrk/midnight-js-contracts';
-import type { State, BBoardPrivateState, Contract, Witnesses } from '../../contract/src/index';
+import type { Post, AuthorityCredential, BBoardPrivateState, Contract, Witnesses } from '../../contract/src/index';
 
 export const bboardPrivateStateKey = 'bboardPrivateState';
 export type PrivateStateId = typeof bboardPrivateStateKey;
@@ -61,7 +61,7 @@ export type BBoardContract = Contract<BBoardPrivateState, Witnesses<BBoardPrivat
  *
  * @public
  */
-export type BBoardCircuitKeys = Exclude<keyof BBoardContract['impureCircuits'], number | symbol>;
+export type BBoardCircuitKeys = 'issueCredential' | 'verify_credential' | 'post' | 'getAuthorityPk' | 'getSequence' | 'getPostCount' | 'getAuthorCount';
 
 /**
  * The providers required by {@link BBoardContract}.
@@ -78,22 +78,21 @@ export type BBoardProviders = MidnightProviders<BBoardCircuitKeys, PrivateStateI
 export type DeployedBBoardContract = FoundContract<BBoardContract>;
 
 /**
- * A type that represents the derived combination of public (or ledger), and private state.
+ * A type that represents the derived combination of public (ledger), and private state.
  */
 export type BBoardDerivedState = {
-  readonly state: State;
   readonly sequence: bigint;
-  readonly message: string | undefined;
+  readonly posts: Post[];
+  readonly postCount: bigint;
+  readonly authorCount: bigint;
 
   /**
-   * A readonly flag that determines if the current message was posted by the current user.
+   * A readonly flag that determines if the current user is the contract authority.
    *
    * @remarks
-   * The `owner` property of the public (or ledger) state is the public key of the message owner, while
-   * the `secretKey` property of {@link BBoardPrivateState} is the secret key of the current user. If
-   * `owner` corresponds to the public key derived from `secretKey`, then `isOwner` is `true`.
+   * The authority can issue credentials to users, allowing them to post messages.
    */
-  readonly isOwner: boolean;
+  readonly isAuthority: boolean;
 };
 
 // TODO: for some reason I needed to include "@midnight-ntwrk/wallet-sdk-address-format": "1.0.0-rc.1", should we bump in to rc-2 ?

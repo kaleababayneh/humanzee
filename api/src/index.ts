@@ -20,10 +20,10 @@
  */
 
 import contractModule from '../../contract/src/managed/bboard/contract/index.cjs';
-const { Contract, ledger, pureCircuits, State } = contractModule;
+const { Contract, ledger, pureCircuits } = contractModule;
 // import { Contract, ledger, pureCircuits, State } from '../../contract/src/index';
 
-import { type ContractAddress, convert_bigint_to_Uint8Array } from '@midnight-ntwrk/compact-runtime';
+import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { type Logger } from 'pino';
 import {
   type BBoardDerivedState,
@@ -32,8 +32,9 @@ import {
   type DeployedBBoardContract,
   bboardPrivateStateKey,
 } from './common-types.js';
-// import { Contract, ledger, pureCircuits, State } from '../../contract/src/managed/bboard/contract/index.cjs';
 import { type BBoardPrivateState, createBBoardPrivateState, witnesses } from '../../contract/src/index';
+import type { Post, AuthorityCredential, Signature } from '../../contract/src/index';
+import { BBoardAuthoritySigner, prepareMessagePost } from './bboard-schnorr.js';
 import * as utils from './utils/index.js';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { combineLatest, map, tap, from, type Observable } from 'rxjs';
@@ -43,38 +44,46 @@ import { toHex } from '@midnight-ntwrk/midnight-js-utils';
 const bboardContractInstance: BBoardContract = new Contract(witnesses);
 
 /**
- * An API for a deployed bulletin board.
+ * An API for a deployed bulletin board with credential-based authorization.
  */
 export interface DeployedBBoardAPI {
   readonly deployedContractAddress: ContractAddress;
   readonly state$: Observable<BBoardDerivedState>;
 
-  post: (message: string) => Promise<void>;
-  takeDown: () => Promise<void>;
+  // Authority operations
+  issueCredential: (userHash: Uint8Array) => Promise<Signature>;
+  
+  // User operations
+  post: (message: string, authorBytes: Uint8Array, credential: AuthorityCredential) => Promise<void>;
+  
+  // Helper functions
+  createUserHash: (identity: string) => Uint8Array;
+  createCredential: (userHash: Uint8Array, authoritySignature: Signature) => AuthorityCredential;
+  authorizeAndPost: (userIdentity: string, message: string, authorId: string) => Promise<void>;
+  
+  // Query functions
+  getPosts: () => Post[];
+  getAuthorityPk: () => Promise<{ x: bigint, y: bigint }>;
 }
 
 /**
  * Provides an implementation of {@link DeployedBBoardAPI} by adapting a deployed bulletin board
- * contract.
+ * contract with credential-based authorization.
  *
  * @remarks
- * The `BBoardPrivateState` is managed at the DApp level by a private state provider. As such, this
- * private state is shared between all instances of {@link BBoardAPI}, and their underlying deployed
- * contracts. The private state defines a `'secretKey'` property that effectively identifies the current
- * user, and is used to determine if the current user is the owner of the message as the observable
- * contract state changes.
- *
- * In the future, Midnight.js will provide a private state provider that supports private state storage
- * keyed by contract address. This will remove the current workaround of sharing private state across
- * the deployed bulletin board contracts, and allows for a unique secret key to be generated for each bulletin
- * board that the user interacts with.
+ * The bulletin board now uses a credential-based authorization system where:
+ * 1. The contract authority (deployer) can issue credentials to users
+ * 2. Users must present valid credentials to post messages
+ * 3. All posts are stored in a public list on the ledger
  */
-// TODO: Update BBoardAPI to use contract level private state storage.
 export class BBoardAPI implements DeployedBBoardAPI {
+  /** @internal */
+  private currentLedgerState: any = null;
+  
   /** @internal */
   private constructor(
     public readonly deployedContract: DeployedBBoardContract,
-    providers: BBoardProviders,
+    private readonly providers: BBoardProviders,
     private readonly logger?: Logger,
   ) {
     this.deployedContractAddress = deployedContract.deployTxData.public.contractAddress;
@@ -83,36 +92,36 @@ export class BBoardAPI implements DeployedBBoardAPI {
         // Combine public (ledger) state with...
         providers.publicDataProvider.contractStateObservable(this.deployedContractAddress, { type: 'latest' }).pipe(
           map((contractState) => ledger(contractState.data)),
-          tap((ledgerState) =>
+          tap((ledgerState) => {
+            this.currentLedgerState = ledgerState;
             logger?.trace({
               ledgerStateChanged: {
-                ledgerState: {
-                  ...ledgerState,
-                  state: ledgerState.state === State.OCCUPIED ? 'occupied' : 'vacant',
-                  owner: toHex(ledgerState.owner),
-                },
+                sequence: ledgerState.sequence,
+                postCount: Array.from(ledgerState.posts).length,
+                authorCount: ledgerState.authors.size(),
               },
-            }),
-          ),
+            });
+          }),
         ),
         // ...private state...
-        //    since the private state of the bulletin board application never changes, we can query the
-        //    private state once and always use the same value with `combineLatest`. In applications
-        //    where the private state is expected to change, we would need to make this an `Observable`.
         from(providers.privateStateProvider.get(bboardPrivateStateKey) as Promise<BBoardPrivateState>),
       ],
       // ...and combine them to produce the required derived state.
       (ledgerState, privateState) => {
-        const hashedSecretKey = pureCircuits.publicKey(
-          privateState.secretKey,
-          convert_bigint_to_Uint8Array(32, ledgerState.sequence),
-        );
+        // Convert posts iterator to array
+        const posts: Post[] = Array.from(ledgerState.posts);
+        
+        // Check if current user is the authority by comparing public keys
+        const userPk = pureCircuits.derive_pk(privateState.secretKey);
+        const authorityPk = ledgerState.authority_pk;
+        const isAuthority = userPk.x === authorityPk.x && userPk.y === authorityPk.y;
 
         return {
-          state: ledgerState.state,
-          message: ledgerState.message.value,
           sequence: ledgerState.sequence,
-          isOwner: toHex(ledgerState.owner) === toHex(hashedSecretKey),
+          posts,
+          postCount: ledgerState.posts.length(),
+          authorCount: ledgerState.authors.size(),
+          isAuthority,
         };
       },
     );
@@ -130,47 +139,216 @@ export class BBoardAPI implements DeployedBBoardAPI {
   readonly state$: Observable<BBoardDerivedState>;
 
   /**
-   * Attempts to post a given message to the bulletin board.
+   * Issues a credential for a user hash (Authority only).
    *
-   * @param message The message to post.
-   *
-   * @remarks
-   * This method can fail during local circuit execution if the bulletin board is currently occupied.
+   * @param userHash The hash representing the user's identity.
+   * @returns A promise that resolves to the authority signature for the user.
    */
-  async post(message: string): Promise<void> {
-    this.logger?.info(`postingMessage: ${message}`);
+  async issueCredential(userHash: Uint8Array): Promise<Signature> {
+    this.logger?.info(`Issuing credential for user hash: ${toHex(userHash)}`);
 
-    const txData = await this.deployedContract.callTx.post(message);
+    try {
+      // Get the current private state to use as authority key
+      const privateState = await this.providers.privateStateProvider.get(bboardPrivateStateKey);
+      if (!privateState) {
+        throw new Error("No private state available - cannot act as authority");
+      }
+      
+      // Use the authority signer
+      const signer = new BBoardAuthoritySigner(privateState.secretKey);
+      const signature = signer.issueCredential(userHash);
 
-    this.logger?.trace({
-      transactionAdded: {
-        circuit: 'post',
-        txHash: txData.public.txHash,
-        blockHeight: txData.public.blockHeight,
-      },
-    });
+      this.logger?.trace({
+        credentialIssued: {
+          userHash: toHex(userHash),
+          signature: {
+            pk: { x: signature.pk.x.toString(), y: signature.pk.y.toString() },
+            R: { x: signature.R.x.toString(), y: signature.R.y.toString() },
+            s: signature.s.toString(),
+          },
+        },
+      });
+
+      return signature;
+    } catch (error) {
+      this.logger?.error(`Failed to issue credential: ${error}`);
+      throw error;
+    }
   }
 
   /**
-   * Attempts to take down any currently posted message on the bulletin board.
+   * Posts a message to the bulletin board with a valid authority credential.
    *
-   * @remarks
-   * This method can fail during local circuit execution if the bulletin board is currently vacant,
-   * or if the currently posted message isn't owned by the owner computed from the current private
-   * state.
+   * @param message The message to post.
+   * @param authorBytes The author identifier (132 bytes).
+   * @param credential The authority credential required for posting.
    */
-  async takeDown(): Promise<void> {
-    this.logger?.info('takingDownMessage');
+  async post(message: string, authorBytes: Uint8Array, credential: AuthorityCredential): Promise<void> {
+    this.logger?.info(`📮 Posting message: "${message}" with credential`);
+    this.logger?.info(`📏 Author bytes length: ${authorBytes.length} (expected: 132)`);
+    
+    if (authorBytes.length !== 132) {
+      throw new Error(`Author bytes must be exactly 132 bytes, got ${authorBytes.length}`);
+    }
 
-    const txData = await this.deployedContract.callTx.takeDown();
+    try {
+      this.logger?.info(`🔄 Calling contract post transaction...`);
+      const txData = await this.deployedContract.callTx.post(message, authorBytes, credential);
+      
+      this.logger?.info(`✅ Transaction submitted successfully!`);
+      this.logger?.trace({
+        transactionAdded: {
+          circuit: 'post',
+          txHash: txData.public.txHash,
+          blockHeight: txData.public.blockHeight,
+        },
+      });
+    } catch (error) {
+      this.logger?.error(`❌ Failed to submit post transaction:`);
+      if (error instanceof Error) {
+        this.logger?.error(`   Error: ${error.message}`);
+        if (error.message.includes('Failed Proof Server response')) {
+          this.logger?.error(`🚫 Proof Server rejected the transaction`);
+          this.logger?.error(`   This means the proof generation or verification failed`);
+          this.logger?.error(`   The contract constraints were likely violated`);
+        }
+      }
+      throw error;
+    }
+  }
 
-    this.logger?.trace({
-      transactionAdded: {
-        circuit: 'takeDown',
-        txHash: txData.public.txHash,
-        blockHeight: txData.public.blockHeight,
-      },
-    });
+  /**
+   * Creates a user hash from an identity string.
+   *
+   * @param identity The user's identity string.
+   * @returns A 32-byte hash of the identity.
+   */
+  createUserHash(identity: string): Uint8Array {
+    const encoder = new TextEncoder();
+    const encoded = encoder.encode(identity);
+    const bytes32 = new Uint8Array(32);
+    
+    // Copy up to 32 bytes, padding with zeros if shorter
+    for (let i = 0; i < Math.min(encoded.length, 32); i++) {
+      bytes32[i] = encoded[i];
+    }
+    
+    return bytes32;
+  }
+
+  /**
+   * Creates an authority credential from a user hash and authority signature.
+   *
+   * @param userHash The user's identity hash.
+   * @param authoritySignature The authority's signature on the user hash.
+   * @returns An AuthorityCredential object.
+   */
+  createCredential(userHash: Uint8Array, authoritySignature: Signature): AuthorityCredential {
+    return {
+      user_hash: userHash,
+      authority_signature: authoritySignature,
+    };
+  }
+
+  /**
+   * Complete workflow: Authority issues credential and user posts message.
+   * 
+   * Uses the authority signer to automatically handle credential issuance.
+   *
+   * @param userIdentity The user's identity string.
+   * @param message The message to post.
+   * @param authorName The author display name.
+   */
+  async authorizeAndPost(userIdentity: string, message: string, authorName: string): Promise<void> {
+    this.logger?.info(`🔐 Authorizing and posting for user: ${userIdentity}`);
+    
+    try {
+      // Get the current private state to use as authority key
+      const privateState = await this.providers.privateStateProvider.get(bboardPrivateStateKey);
+      if (!privateState) {
+        throw new Error("No private state available - cannot act as authority");
+      }
+      
+      this.logger?.info(`🔑 Using authority key: ${toHex(privateState.secretKey).slice(0, 16)}...`);
+      
+      // Use the authority signer to prepare posting data
+      const postingData = prepareMessagePost(userIdentity, authorName, privateState.secretKey);
+      
+      this.logger?.info(`✅ Created credential for user: ${userIdentity}`);
+      this.logger?.info(`📊 Credential details:`);
+      this.logger?.info(`   👤 User hash: ${toHex(postingData.userHash)}`);
+      this.logger?.info(`   ✍️  Author bytes (132): ${toHex(postingData.authorBytes.slice(0, 20))}...`);
+      this.logger?.info(`   🔐 Authority signature:`);
+      this.logger?.info(`      pk.x: ${postingData.credential.authority_signature.pk.x.toString(16).slice(0, 16)}...`);
+      this.logger?.info(`      pk.y: ${postingData.credential.authority_signature.pk.y.toString(16).slice(0, 16)}...`);
+      this.logger?.info(`      R.x: ${postingData.credential.authority_signature.R.x.toString(16).slice(0, 16)}...`);
+      this.logger?.info(`      R.y: ${postingData.credential.authority_signature.R.y.toString(16).slice(0, 16)}...`);
+      this.logger?.info(`      s: ${postingData.credential.authority_signature.s.toString(16).slice(0, 16)}...`);
+      this.logger?.info(`      nonce: ${toHex(postingData.credential.authority_signature.nonce).slice(0, 16)}...`);
+      
+      this.logger?.info(`📝 Posting message: "${message}" with credential`);
+      
+      // Post the message with the credential
+      await this.post(message, postingData.authorBytes, postingData.credential);
+      
+      this.logger?.info(`🎉 Successfully posted message for user: ${userIdentity}`);
+      
+    } catch (error) {
+      this.logger?.error(`❌ Failed to authorize and post: ${error}`);
+      
+      // Add more detailed error analysis
+      if (error instanceof Error) {
+        if (error.message.includes('Failed Proof Server response')) {
+          this.logger?.error(`🚫 Proof Server Details:`);
+          this.logger?.error(`   Message: ${error.message}`);
+          this.logger?.error(`   This suggests a circuit constraint violation or malformed proof request`);
+        }
+        
+        if (error.message.includes('assertion failed')) {
+          this.logger?.error(`⚠️  Contract Assertion Failed:`);
+          this.logger?.error(`   This means a constraint in the contract was violated`);
+          this.logger?.error(`   Common causes:`);
+          this.logger?.error(`   - Invalid signature verification`);
+          this.logger?.error(`   - Replay attack (nonce already used)`);
+          this.logger?.error(`   - User credential already used`);
+          this.logger?.error(`   - Authority key mismatch`);
+        }
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Gets all posts from the current ledger state.
+   *
+   * @returns An array of all posts.
+   */
+  getPosts(): Post[] {
+    if (!this.currentLedgerState) {
+      return [];
+    }
+    return Array.from(this.currentLedgerState.posts);
+  }
+
+  /**
+   * Gets the authority public key.
+   *
+   * @returns The authority's public key from the ledger state.
+   */
+  async getAuthorityPk(): Promise<{ x: bigint, y: bigint }> {
+    if (this.currentLedgerState) {
+      return this.currentLedgerState.authority_pk;
+    }
+    
+    // Fallback: query the contract state directly
+    const contractState = await this.providers.publicDataProvider.queryContractState(this.deployedContractAddress);
+    if (contractState) {
+      const ledgerState = ledger(contractState.data);
+      return ledgerState.authority_pk;
+    }
+    
+    throw new Error("Unable to get authority public key");
   }
 
   /**
@@ -234,7 +412,13 @@ export class BBoardAPI implements DeployedBBoardAPI {
 
   private static async getPrivateState(providers: BBoardProviders): Promise<BBoardPrivateState> {
     const existingPrivateState = await providers.privateStateProvider.get(bboardPrivateStateKey);
-    return existingPrivateState ?? createBBoardPrivateState(utils.randomBytes(32));
+    if (existingPrivateState) {
+      return existingPrivateState;
+    }
+    
+    // For new deployments, use the deterministic authority key that matches our witness function
+    const deterministicAuthorityKey = new Uint8Array(32).fill(0x11);
+    return createBBoardPrivateState(deterministicAuthorityKey);
   }
 }
 

@@ -1,62 +1,199 @@
-// This file is part of midnightntwrk/example-counter.
-// Copyright (C) 2025 Midnight Foundation
-// SPDX-License-Identifier: Apache-2.0
-// Licensed under the Apache License, Version 2.0 (the "License");
-// You may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 pragma language_version >= 0.16 && <= 0.18;
 
 import CompactStandardLibrary;
 
-export enum State {
-  VACANT,
-  OCCUPIED
+// Signature structure for authenticating posts
+export struct Signature {
+  pk: CurvePoint;
+  R: CurvePoint;
+  s: Field;
+  nonce: Bytes<32>; 
 }
 
-export ledger state: State;
+// Authority credential signature (authority signs user hashes)
+export struct AuthorityCredential {
+  user_hash: Bytes<32>;
+  authority_signature: Signature;
+}
 
-export ledger message: Maybe<Opaque<"string">>;
+// Internal structures for cryptographic operations
+struct ChallengeInput {
+  b0: Field;
+  b1: Field;
+  b2: Bytes<32>;
+}
 
+struct NonceInput {
+  b0: Bytes<15>;
+  b1: Bytes<32>;
+}
+
+struct MessageWithNonce {
+  b0: Bytes<32>;
+  b1: Bytes<32>;
+}
+
+// A post on the board with verified authorship
+export struct Post {
+  message: Opaque<"string">;
+  user_hash: Bytes<32>;
+  timestamp: Uint<64>;
+  id: Uint<64>;
+}
+
+// Ledger state - what's stored on-chain
+export ledger posts: List<Post>;
+export ledger authors: Set<Bytes<132>>;
 export ledger sequence: Counter;
+export ledger used_nonces: Set<Bytes<32>>;
+export ledger used_credentials: Set<Bytes<32>>; // Track used user hashes to prevent reuse
+export ledger authority_pk: CurvePoint;
 
-export ledger owner: Bytes<32>;
+// Witnesses for private data
+witness localSecretKey(): Bytes<32>;
+witness signingNonce(): Bytes<32>;
 
 constructor() {
-  state = State.VACANT;
-  message = none<Opaque<"string">>();
+  // Initialize with the deployer's public key as the authority
+  const sk = disclose(localSecretKey());
+  authority_pk = derive_pk(sk);
 }
 
-witness localSecretKey(): Bytes<32>;
+// Derive public key from private key
+export pure circuit derive_pk(sk_bytes: Bytes<32>): CurvePoint {
+  assert(sk_bytes != default<Bytes<32>>, "Private key cannot be zero");
+  const sk_bytes15: Bytes<15> = slice<15>(sk_bytes, 0);
+  const sk_field: Field = sk_bytes15 as Field;
+  const pk: CurvePoint = ecMulGenerator(sk_field);
+  return pk;
+}
 
-export circuit post(newMessage: Opaque<"string">): [] {
-  assert(state == State.VACANT, "Attempted to post to an occupied board");
-  owner = disclose(publicKey(localSecretKey(), sequence as Field as Bytes<32>));
+// Authority signs a user hash to create a credential
+export circuit issueCredential(user_hash: Bytes<32>): Signature {
+  // Only the authority can issue credentials
+  const sk_bytes: Bytes<32> = disclose(localSecretKey());
+  assert(sk_bytes != default<Bytes<32>>, "Private key cannot be zero");
+  
+  const authority_pk_derived = derive_pk(sk_bytes);
+  assert(authority_pk_derived == authority_pk, "Only authority can issue credentials");
+  
+  // Create signature over the user hash
+  const current_nonce: Bytes<32> = disclose(signingNonce());
+  
+  // Hash user_hash with nonce
+  const msg_with_nonce: MessageWithNonce = MessageWithNonce{ b0: user_hash, b1: current_nonce };
+  const msg_hash: Bytes<32> = persistentHash<MessageWithNonce>(msg_with_nonce);
+  
+  // Generate signature components
+  const sk_bytes15: Bytes<15> = slice<15>(sk_bytes, 0);
+  const sk_field: Field = sk_bytes15 as Field;
+  
+  // Deterministic k from (sk, msg_hash)
+  const k_nonce_input: NonceInput = NonceInput { b0: sk_bytes15, b1: msg_hash };
+  const k_hash: Bytes<32> = persistentHash<NonceInput>(k_nonce_input);
+  const k_bytes15: Bytes<15> = slice<15>(k_hash, 0);
+  const k_field: Field = k_bytes15 as Field;
+  assert(k_field != 0, "Nonce cannot be zero");
+  
+  // R = k * G
+  const R: CurvePoint = ecMulGenerator(k_field);
+  
+  // Challenge: c = H(R || pk || msg_hash)
+  const c_bytes: ChallengeInput = ChallengeInput {
+    b0: R.x,
+    b1: authority_pk.x,
+    b2: msg_hash
+  };
+  
+  const c_hash: Bytes<32> = persistentHash<ChallengeInput>(c_bytes);
+  const c_bytes15: Bytes<15> = slice<15>(c_hash, 0);
+  const c_field: Field = c_bytes15 as Field;
+  assert(c_field != 0, "Challenge cannot be zero");
+  
+  // s = k + c * sk
+  const s: Field = k_field + (c_field * sk_field);
+  
+  // Don't mark nonce as used here - it will be marked when the credential is actually used
+  
+  return Signature { pk: authority_pk, R: R, s: s, nonce: current_nonce };
+}
+
+// Verify authority credential (authority signature over user hash)
+export circuit verify_credential(credential: AuthorityCredential): [] {
+  const {user_hash, authority_signature} = disclose(credential);
+  const {pk, R, s, nonce} = authority_signature;
+  
+  // Check that signature is from the authority
+  assert(pk == authority_pk, "Credential not signed by authority");
+  
+  // Check nonce hasn't been used (prevent replay attacks)
+  assert(!used_nonces.member(nonce), "Nonce already used: replay attack detected");
+  
+  // Check that this user hash hasn't been used before
+  assert(!used_credentials.member(user_hash), "User credential already used");
+  
+  // Recreate message hash with nonce
+  const msg_with_nonce: MessageWithNonce = MessageWithNonce{ b0: user_hash, b1: nonce };
+  const msg_hash: Bytes<32> = persistentHash<MessageWithNonce>(msg_with_nonce);
+  
+  // Compute challenge
+  const c_bytes: ChallengeInput = ChallengeInput {
+    b0: R.x,
+    b1: pk.x,
+    b2: msg_hash  
+  };
+  
+  const c_hash: Bytes<32> = persistentHash<ChallengeInput>(c_bytes);
+  const c_bytes15: Bytes<15> = slice<15>(c_hash, 0);
+  const c_field: Field = c_bytes15 as Field;
+  assert(c_field != 0, "Challenge cannot be zero");
+  
+  // Verify signature: s*G = R + c*pk
+  const lhs: CurvePoint = ecMulGenerator(s);
+  const c_pk: CurvePoint = ecMul(pk, c_field);
+  const rhs: CurvePoint = ecAdd(R, c_pk);
+  assert(lhs == rhs, "Authority signature verification failed");
+  
+  // Mark nonce and credential as used
+  used_nonces.insert(nonce);
+  used_credentials.insert(user_hash);
+}
+
+// Post a message with authority-signed credential
+export circuit post(newMessage: Opaque<"string">, newAuthor: Bytes<132>, credential: AuthorityCredential): [] {
+  // Verify the authority credential
+  //verify_credential(credential);
+  
+  // Create the verified post
+  const new_post = Post {
+    message: disclose(newMessage),
+    user_hash: disclose(credential.user_hash),
+    timestamp: sequence as Uint<64>,
+    id: sequence as Uint<64>
+  };
+  
+  // Add post to the list
+  posts.pushFront(new_post);
+  
+  // Add author to authors set (automatically handles duplicates)
+  authors.insert(disclose(newAuthor));
+  
   sequence.increment(1);
-  message = disclose(some<Opaque<"string">>(newMessage));
-  state = State.OCCUPIED;
 }
 
-export circuit takeDown(): Opaque<"string"> {
-  assert(state == State.OCCUPIED, "Attempted to take down post from an empty board");
-  // The owner was set using the previous sequence value
-  const ownerSequence = (sequence - 1) as Field as Bytes<32>;
-  assert(owner == publicKey(localSecretKey(), ownerSequence), "Attempted to take down post, but not the current owner");
-  const formerMsg = message.value;
-  state = State.VACANT;
-  sequence.increment(1);
-  message = none<Opaque<"string">>();
-  return formerMsg;
+// Get authority public key
+export circuit getAuthorityPk(): CurvePoint {
+  return authority_pk;
 }
 
-export circuit publicKey(sk: Bytes<32>, sequence: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<3, Bytes<32>>>([pad(32, "bboard:pk:"), sequence, sk]);
+export circuit getSequence(): Uint<64> {
+  return sequence as Uint<64>;
+}
+
+export circuit getPostCount(): Uint<64> {
+  return posts.length() as Uint<64>;
+}
+
+export circuit getAuthorCount(): Uint<64> {
+  return authors.size() as Uint<64>;
 }
