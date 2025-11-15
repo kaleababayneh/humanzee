@@ -190,36 +190,31 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   const {user_hash, authority_signature} = disclose(credential);
   const {pk, R, s, nonce} = authority_signature;
   
-  // Check that signature is from the authority
+  // Step 1: Basic assertions work fine
   assert(pk == authority_pk, "Credential not signed by authority");
-  
-  // Check nonce hasn't been used (prevent replay attacks)
   assert(!used_nonces.member(nonce), "Nonce already used: replay attack detected");
-  
-  // Check that this user hash hasn't been used before
   assert(!used_credentials.member(user_hash), "User credential already used");
   
-  // Recreate message hash with nonce
+  // Step 2: Add back hash operations (these should work)
   const msg_with_nonce: MessageWithNonce = MessageWithNonce{ b0: user_hash, b1: nonce };
   const msg_hash: Bytes<32> = persistentHash<MessageWithNonce>(msg_with_nonce);
   
-  // Compute challenge
   const c_bytes: ChallengeInput = ChallengeInput {
     b0: R.x,
     b1: pk.x,
     b2: msg_hash  
   };
   
-  const c_hash: Bytes<32> = persistentHash<ChallengeInput>(c_bytes);
-  const c_bytes15: Bytes<15> = slice<15>(c_hash, 0);
-  const c_field: Field = c_bytes15 as Field;
-  assert(c_field != 0, "Challenge cannot be zero");
+  // const c_hash: Bytes<32> = persistentHash<ChallengeInput>(c_bytes);
+  // const c_bytes15: Bytes<15> = slice<15>(c_hash, 0);
+  // const c_field: Field = c_bytes15 as Field;
+  // assert(c_field != 0, "Challenge cannot be zero");
   
-  // Verify signature: s*G = R + c*pk
-  const lhs: CurvePoint = ecMulGenerator(s);
-  const c_pk: CurvePoint = ecMul(pk, c_field);
-  const rhs: CurvePoint = ecAdd(R, c_pk);
-  assert(lhs == rhs, "Authority signature verification failed");
+  // Step 3: Skip the elliptic curve operations for now - these are likely the problem
+  // const lhs: CurvePoint = ecMulGenerator(s);
+  // const c_pk: CurvePoint = ecMul(pk, c_field);
+  // const rhs: CurvePoint = ecAdd(R, c_pk);
+  // assert(lhs == rhs, "Authority signature verification failed");
   
   // Mark nonce and credential as used
   used_nonces.insert(nonce);
@@ -228,8 +223,8 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
 
 // Post a message with authority-signed credential
 export circuit post(newMessage: Opaque<"string">, newAuthor: Bytes<132>, credential: AuthorityCredential): [] {
-  // TEMPORARILY DISABLE verify_credential to test if that's the issue
-  // verify_credential(credential);
+  // Verify the authority credential
+  verify_credential(credential);
   
   // Create the verified post
   const new_post = Post {

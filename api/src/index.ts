@@ -436,14 +436,17 @@ export class BBoardAPI implements DeployedBBoardAPI {
   }
 
   private static async getPrivateState(providers: BBoardProviders): Promise<BBoardPrivateState> {
-    const existingPrivateState = await providers.privateStateProvider.get(bboardPrivateStateKey);
-    if (existingPrivateState) {
-      return existingPrivateState;
-    }
-    
-    // For new deployments, use the deterministic authority key that matches our witness function
+    // FORCE use of deterministic authority key for debugging - ignore any existing state
     const deterministicAuthorityKey = new Uint8Array(32).fill(0x11);
     return createBBoardPrivateState(deterministicAuthorityKey);
+    
+    // Original logic (commented out for debugging):
+    // const existingPrivateState = await providers.privateStateProvider.get(bboardPrivateStateKey);
+    // if (existingPrivateState) {
+    //   return existingPrivateState;
+    // }
+    // const deterministicAuthorityKey = new Uint8Array(32).fill(0x11);
+    // return createBBoardPrivateState(deterministicAuthorityKey);
   }
 }
 
