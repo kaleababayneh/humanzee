@@ -31,12 +31,10 @@ import { WitnessContext } from "@midnight-ntwrk/compact-runtime";
 
 export type BBoardPrivateState = {
   readonly secretKey: Uint8Array;
-  readonly signingNonce?: Uint8Array;
 };
 
-export const createBBoardPrivateState = (secretKey: Uint8Array, signingNonce?: Uint8Array) => ({
+export const createBBoardPrivateState = (secretKey: Uint8Array) => ({
   secretKey,
-  signingNonce,
 });
 
 /* **********************************************************************
@@ -76,20 +74,4 @@ export const witnesses = {
     console.log('🔍 WITNESS DEBUG: Ledger sequence:', context.ledger?.sequence);
     return [context.privateState, context.privateState.secretKey];
   }, // Return the actual secret key from private state
-  
-  signingNonce: (context: WitnessContext<Ledger, BBoardPrivateState>): [
-    BBoardPrivateState,
-    Uint8Array,
-  ] => {
-    // FIXED nonce for debugging - since it's first post, no reuse issue
-    const fixedNonce = new Uint8Array(32).fill(0x42);
-    const dynamicNonce = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) {
-      dynamicNonce[i] = Math.floor(Math.random() * 256);
-    }
-    console.log('🔍 WITNESS DEBUG: signingNonce() called, returning fixed nonce:', Array.from(dynamicNonce.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(''));
-    console.log('🔍 WITNESS DEBUG: Context info - contract address:', context.contractAddress);
-    console.log('🔍 WITNESS DEBUG: Ledger sequence:', context.ledger?.sequence);
-    return [context.privateState, dynamicNonce];
-  },
 };

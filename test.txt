@@ -1,0 +1,24 @@
+{
+  "test_type": "Contract simulator signature",
+  "timestamp": "2025-11-15T18:52:24.147Z",
+  "input": {
+    "user_identity": "kal",
+    "user_hash": "6b616c0000000000000000000000000000000000000000000000000000000000"
+  },
+  "authority_pk": {
+    "x": "16da03c1f768c28b7cc8e2d6248d30874250c985a5db2739564134204a32aa2e",
+    "y": "26dcb25fc14614a5676030c8dde1d2ee9195246905f3c6f0557c921084c6fc16"
+  },
+  "signature": {
+    "pk": {
+      "x": "16da03c1f768c28b7cc8e2d6248d30874250c985a5db2739564134204a32aa2e",
+      "y": "26dcb25fc14614a5676030c8dde1d2ee9195246905f3c6f0557c921084c6fc16"
+    },
+    "R": {
+      "x": "cef2c1520c526f18758f0b8bef4f587ac68321e4de329f3f613a89003984e6d",
+      "y": "5af2e3c8abe7b23a5470f7e48a0ae1fe06c86f1f96371986ce56b90694453ab4"
+    },
+    "s": "667aae0770f0c1a5db3d8c09438237d35cb65df3ccd528e113556e4f359",
+    "nonce": "c42d3ff9ce902cb3830c3f6439e269420b16206416ebd00c66f8930fcd92a348"
+  }
+}

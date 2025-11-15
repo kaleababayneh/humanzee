@@ -51,7 +51,6 @@ export ledger authority_pk: CurvePoint;
 
 // Witnesses for private data
 witness localSecretKey(): Bytes<32>;
-witness signingNonce(): Bytes<32>;
 
 constructor() {
   // Initialize with the deployer's public key as the authority
@@ -77,15 +76,16 @@ export circuit issueCredential(user_hash: Bytes<32>): Signature {
   const authority_pk_derived = derive_pk(sk_bytes);
   assert(authority_pk_derived == authority_pk, "Only authority can issue credentials");
   
-  // Create signature over the user hash
-  const current_nonce: Bytes<32> = disclose(signingNonce());
+  // Generate deterministic nonce from user_hash and authority key
+  const sk_bytes15: Bytes<15> = slice<15>(sk_bytes, 0);
+  const nonce_input: NonceInput = NonceInput { b0: sk_bytes15, b1: user_hash };
+  const current_nonce: Bytes<32> = persistentHash<NonceInput>(nonce_input);
   
   // Hash user_hash with nonce
   const msg_with_nonce: MessageWithNonce = MessageWithNonce{ b0: user_hash, b1: current_nonce };
   const msg_hash: Bytes<32> = persistentHash<MessageWithNonce>(msg_with_nonce);
   
   // Generate signature components
-  const sk_bytes15: Bytes<15> = slice<15>(sk_bytes, 0);
   const sk_field: Field = sk_bytes15 as Field;
   
   // Deterministic k from (sk, msg_hash)
@@ -215,15 +215,15 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   
   const c_hash: Bytes<32> = persistentHash<ChallengeInput>(c_bytes);
   const c_bytes15: Bytes<15> = slice<15>(c_hash, 0);
+  assert(c_bytes15 != default<Bytes<15>>, "Challenge bytes cannot be zero");
   const c_field: Field = c_bytes15 as Field;
-  //assert(false, "Debug: Reached challenge computation");
-  //assert(c_field != 0, "Challenge cannot be zero");
+  assert(c_field != 0, "Challenge cannot be zero");
   
-  // Step 3: Skip the elliptic curve operations for now - these are likely the problem
-  //const lhs: CurvePoint = ecMulGenerator(s);
-  //const c_pk: CurvePoint = ecMul(pk, c_field);
-  // const rhs: CurvePoint = ecAdd(R, c_pk);
-  // assert(lhs == rhs, "Authority signature verification failed");
+  // Step 3: Re-enable the elliptic curve operations for signature verification
+  const lhs: CurvePoint = ecMulGenerator(s);
+  const c_pk: CurvePoint = ecMul(pk, c_field);
+  const rhs: CurvePoint = ecAdd(R, c_pk);
+  assert(lhs == rhs, "Authority signature verification failed");
   
   // Mark nonce and credential as used
   used_nonces.insert(nonce);

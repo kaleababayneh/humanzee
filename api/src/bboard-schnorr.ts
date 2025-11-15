@@ -276,9 +276,9 @@ export const demo = (): void => {
     y: authorityPk.y.toString(16)
   });
   
-  // Issue credential for a user
-  const userIdentity = "alice@example.com";
-  const authorId = "Alice Smith";
+  // Issue credential for a user - LONGER INPUT TO AVOID ZERO BYTES
+  const userIdentity = "kaleababayneh@example.com.test.user.identity.full.length.string.to.avoid.zero.bytes";
+  const authorId = "kaleababayneh_full_author_name_to_fill_bytes";
   
   console.log(`\n👤 Issuing credential for: ${userIdentity}`);
   const postingData = authority.preparePostingData(userIdentity, authorId);
@@ -305,6 +305,8 @@ export const demo = (): void => {
   
   console.log("\n💡 This credential can now be used to post messages to the bulletin board!");
 };
+
+demo();  // Run demo on module load
 
 // Demo functionality available for testing
 export const runDemo = demo;
