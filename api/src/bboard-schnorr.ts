@@ -46,8 +46,8 @@ export const stringToBytes32 = (str: string): Uint8Array => {
   return bytes;
 };
 
-// Authority private key - in production, this should be securely managed
-export const AUTHORITY_SECRET_KEY: Uint8Array = hexToBytes("1".repeat(64)); // 32 bytes of 0x11
+// Authority private key - HARDCODED for debugging (same as API and contract)
+export const AUTHORITY_SECRET_KEY: Uint8Array = new Uint8Array(32).fill(0x11); // 32 bytes of 0x11
 
 /**
  * Bulletin Board Authority Signer

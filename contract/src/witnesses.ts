@@ -80,9 +80,8 @@ export const witnesses = {
     BBoardPrivateState,
     Uint8Array,
   ] => {
-    // Generate a random nonce for each signature to prevent replay attacks
-    const randomNonce = new Uint8Array(32);
-    crypto.getRandomValues(randomNonce);
-    return [privateState, randomNonce];
+    // FIXED nonce for debugging to eliminate nonce variation
+    const fixedNonce = new Uint8Array(32).fill(0x42);
+    return [privateState, fixedNonce];
   },
 };

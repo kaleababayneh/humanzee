@@ -271,6 +271,25 @@ export class BBoardAPI implements DeployedBBoardAPI {
       
       this.logger?.info(`🔑 Using authority key: ${toHex(privateState.secretKey).slice(0, 16)}...`);
       
+      // Get current contract authority key for comparison
+      const contractAuthorityPk = await this.getAuthorityPk();
+      this.logger?.info(`📋 Contract authority pk: x=${contractAuthorityPk.x.toString(16).slice(0, 16)}..., y=${contractAuthorityPk.y.toString(16).slice(0, 16)}...`);
+      
+      // Derive public key from our private key to compare
+      const localAuthorityPk = pureCircuits.derive_pk(privateState.secretKey);
+      this.logger?.info(`🔐 Local authority pk: x=${localAuthorityPk.x.toString(16).slice(0, 16)}..., y=${localAuthorityPk.y.toString(16).slice(0, 16)}...`);
+      
+      // Check if they match
+      const keysMatch = localAuthorityPk.x === contractAuthorityPk.x && localAuthorityPk.y === contractAuthorityPk.y;
+      this.logger?.info(`🔗 Authority keys match: ${keysMatch ? '✅ YES' : '❌ NO'}`);
+      
+      if (!keysMatch) {
+        this.logger?.error(`⚠️  CRITICAL: Authority key mismatch detected!`);
+        this.logger?.error(`   This will cause 'pk != authority_pk' assertion failure`);
+        this.logger?.error(`   Contract expects: x=${contractAuthorityPk.x.toString(16)}, y=${contractAuthorityPk.y.toString(16)}`);
+        this.logger?.error(`   CLI is using:    x=${localAuthorityPk.x.toString(16)}, y=${localAuthorityPk.y.toString(16)}`);
+      }
+      
       // Use the authority signer to prepare posting data
       const postingData = prepareMessagePost(userIdentity, authorName, privateState.secretKey);
       
@@ -285,6 +304,11 @@ export class BBoardAPI implements DeployedBBoardAPI {
       this.logger?.info(`      R.y: ${postingData.credential.authority_signature.R.y.toString(16).slice(0, 16)}...`);
       this.logger?.info(`      s: ${postingData.credential.authority_signature.s.toString(16).slice(0, 16)}...`);
       this.logger?.info(`      nonce: ${toHex(postingData.credential.authority_signature.nonce).slice(0, 16)}...`);
+      
+      // Check if signature public key matches contract authority
+      const sigPkMatchesContract = postingData.credential.authority_signature.pk.x === contractAuthorityPk.x && 
+                                   postingData.credential.authority_signature.pk.y === contractAuthorityPk.y;
+      this.logger?.info(`🔐 Signature pk matches contract: ${sigPkMatchesContract ? '✅ YES' : '❌ NO'}`);
       
       this.logger?.info(`📝 Posting message: "${message}" with credential`);
       
@@ -304,14 +328,15 @@ export class BBoardAPI implements DeployedBBoardAPI {
           this.logger?.error(`   This suggests a circuit constraint violation or malformed proof request`);
         }
         
-        if (error.message.includes('assertion failed')) {
-          this.logger?.error(`⚠️  Contract Assertion Failed:`);
-          this.logger?.error(`   This means a constraint in the contract was violated`);
-          this.logger?.error(`   Common causes:`);
-          this.logger?.error(`   - Invalid signature verification`);
-          this.logger?.error(`   - Replay attack (nonce already used)`);
-          this.logger?.error(`   - User credential already used`);
-          this.logger?.error(`   - Authority key mismatch`);
+        if (error.message.includes('assertion failed') || error.message.includes('pk != authority_pk')) {
+          this.logger?.error(`⚠️  Contract Assertion Failed - Authority Key Mismatch:`);
+          this.logger?.error(`   This is exactly the 'pk != authority_pk' assertion we expected!`);
+          this.logger?.error(`   The credential was signed with a different key than the contract authority`);
+        }
+        
+        if (error.message.includes('Credential not signed by authority')) {
+          this.logger?.error(`⚠️  Contract Assertion: 'Credential not signed by authority'`);
+          this.logger?.error(`   This confirms the authority key mismatch theory`);
         }
       }
       
