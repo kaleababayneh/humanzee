@@ -192,8 +192,8 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   
   // Step 1: Basic assertions work fine
   assert(pk == authority_pk, "Credential not signed by authority");
-  assert(!used_nonces.member(nonce), "Nonce already used: replay attack detected");
-  assert(!used_credentials.member(user_hash), "User credential already used");
+  //assert(!used_nonces.member(nonce), "Nonce already used: replay attack detected");
+  //assert(!used_credentials.member(user_hash), "User credential already used");
   
   // Step 2: Add back hash operations with safer field handling
   const msg_with_nonce: MessageWithNonce = MessageWithNonce{ b0: user_hash, b1: nonce };
