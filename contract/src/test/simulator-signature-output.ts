@@ -10,7 +10,7 @@ console.log("🔍 Generating simulator signature for comparison...");
 
 // Use same authority key and input as CLI
 const AUTHORITY_KEY = new Uint8Array(32).fill(0x11);
-const userIdentity = "kal"; // Same as your test input
+const userIdentity = "kaleababayneh@example.com.test.user.identity.full.length.string.to.avoid.zero.bytes";
 
 // Convert to user hash same way as CLI
 const stringToBytes32 = (str: string): Uint8Array => {

@@ -1,9 +1,9 @@
 {
   "test_type": "Contract simulator signature",
-  "timestamp": "2025-11-15T18:52:24.147Z",
+  "timestamp": "2025-11-17T09:01:17.379Z",
   "input": {
-    "user_identity": "kal",
-    "user_hash": "6b616c0000000000000000000000000000000000000000000000000000000000"
+    "user_identity": "kaleababayneh@example.com.test.user.identity.full.length.string.to.avoid.zero.bytes",
+    "user_hash": "6b616c656162616261796e6568406578616d706c652e636f6d2e746573742e75"
   },
   "authority_pk": {
     "x": "16da03c1f768c28b7cc8e2d6248d30874250c985a5db2739564134204a32aa2e",
@@ -15,10 +15,10 @@
       "y": "26dcb25fc14614a5676030c8dde1d2ee9195246905f3c6f0557c921084c6fc16"
     },
     "R": {
-      "x": "cef2c1520c526f18758f0b8bef4f587ac68321e4de329f3f613a89003984e6d",
-      "y": "5af2e3c8abe7b23a5470f7e48a0ae1fe06c86f1f96371986ce56b90694453ab4"
+      "x": "39f67b723dc38f9fdd36937d6c8c931a645ca61215466cd213bc19d80a75a70b",
+      "y": "6aa1e4c18e267738a01bc66613113eb33bb57a0e96b353eb5ad5d174ac9c86c3"
     },
-    "s": "667aae0770f0c1a5db3d8c09438237d35cb65df3ccd528e113556e4f359",
-    "nonce": "c42d3ff9ce902cb3830c3f6439e269420b16206416ebd00c66f8930fcd92a348"
+    "s": "5df3903f5638b43e944e356df9b7c488e8e173d9e98a3c3471ddd5e234",
+    "nonce": "d343569346d7cfb786c9ec84cf9817275bf594626449d1d46f684d37330b2367"
   }
 }
