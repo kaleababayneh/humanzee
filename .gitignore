@@ -40,6 +40,9 @@ jspm_packages/
 # dotenv environment variables file
 .env
 
+# Configuration files with sensitive data
+api/src/config.ts
+
 # MacOS
 .DS_Store
 

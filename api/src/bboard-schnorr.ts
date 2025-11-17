@@ -14,6 +14,7 @@ import {
 import { Contract, pureCircuits } from "../../contract/src/managed/bboard/contract/index.cjs";
 import { witnesses } from "../../contract/src/witnesses.js";
 import type { Signature, AuthorityCredential } from "../../contract/src/index";
+import { config } from './config.js';
 
 // Utility functions
 export const randomBytes = (length: number): Uint8Array => {
@@ -46,8 +47,35 @@ export const stringToBytes32 = (str: string): Uint8Array => {
   return bytes;
 };
 
-// Authority private key - HARDCODED for debugging (same as API and contract)
-export const AUTHORITY_SECRET_KEY: Uint8Array = new Uint8Array(32).fill(0x11); // 32 bytes of 0x11
+// Authority private key - Load from config file
+const getAuthoritySecretKey = (): Uint8Array => {
+  console.log('🔑 Loading Authority Secret Key from config...');
+  
+  try {
+    const keyBytes = hexToBytes(config.authority.secretKey);
+    console.log('✅ Successfully loaded authority key from config');
+    console.log(`🔐 Authority key preview: ${bytesToHex(keyBytes).slice(0, 16)}...`);
+    return keyBytes;
+  } catch (error) {
+    console.error('❌ Failed to load authority key from config:', error);
+    
+    // Fallback for development - NEVER use in production!
+    if (config.environment !== 'production') {
+      console.warn('⚠️  Using hardcoded authority secret key for development!');
+      console.warn('⚠️  Update config.ts with a proper key for production!');
+      const fallbackKey = new Uint8Array(32).fill(0x11);
+      console.log(`🔧 Development fallback key: ${bytesToHex(fallbackKey).slice(0, 16)}...`);
+      return fallbackKey;
+    }
+    
+    throw new Error(`
+❌ Failed to load authority secret key from config.ts!
+
+Please check that config.ts contains a valid 64-character hex string.
+    `);
+  }
+};
+
 
 /**
  * Bulletin Board Authority Signer
@@ -61,7 +89,7 @@ export class BBoardAuthoritySigner {
   private authoritySecretKey: Uint8Array;
 
   constructor(authoritySecretKey?: Uint8Array) {
-    this.authoritySecretKey = authoritySecretKey || AUTHORITY_SECRET_KEY;
+    this.authoritySecretKey = authoritySecretKey || getAuthoritySecretKey();
     this.contract = new Contract(witnesses);
     
     // Initialize contract with authority secret key

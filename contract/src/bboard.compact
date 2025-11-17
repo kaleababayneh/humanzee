@@ -164,7 +164,6 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   const rhs: CurvePoint = ecAdd(R, c_pk);
 
   assert(lhs == rhs, "Authority signature verification failed");
-  // assert(false, "this is the last test");
   // Mark nonce and credential as used
   //used_nonces.insert(nonce);
   //used_credentials.insert(user_hash);
