@@ -162,9 +162,7 @@ export class BBoardAPI implements DeployedBBoardAPI {
     this.logger?.info(`📮 Posting message: "${message}" with credential`);
     this.logger?.info(`📏 Author bytes length: ${authorBytes.length} (expected: 132)`);
     
-    if (authorBytes.length !== 132) {
-      throw new Error(`Author bytes must be exactly 132 bytes, got ${authorBytes.length}`);
-    }
+
 
     try {
       this.logger?.info(`🔄 Calling contract post transaction...`);

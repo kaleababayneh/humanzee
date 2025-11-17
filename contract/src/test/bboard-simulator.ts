@@ -112,11 +112,19 @@ export class BBoardSimulator {
   }
 
   // Create a credential with authority signature
-  public createCredential(userHash: Uint8Array, authoritySignature: Signature): AuthorityCredential {
+  public createCredential(userHash: Uint8Array, authoritySignature: Signature, liveliness: bigint = BigInt(100)): AuthorityCredential {
     return {
       user_hash: userHash,
+      liveliness: liveliness,
       authority_signature: authoritySignature,
     };
+  }
+
+  // Convenience method: Create credential directly from user identity
+  public createCredentialFromIdentity(userIdentity: string, liveliness: bigint = BigInt(100)): AuthorityCredential {
+    const userHash = this.createUserHash(userIdentity);
+    const authoritySignature = this.issueCredential(userHash);
+    return this.createCredential(userHash, authoritySignature, liveliness);
   }
 
   // Post a message with authority credential
@@ -184,25 +192,47 @@ export class BBoardSimulator {
   // Verify a credential
   public verifyCredential(credential: AuthorityCredential): boolean {
     try {
-      this.contract.circuits.verify_credential(this.circuitContext, credential);
+      const result = this.contract.circuits.verify_credential(this.circuitContext, credential);
+      this.circuitContext = result.context;
       return true;
     } catch (error) {
+      console.error('Credential verification failed:', error);
       return false;
     }
   }
 
   // Full workflow: Authority issues credential and user posts
-  public authorizeAndPost(userIdentity: string, message: string, authorId: string): Ledger {
+  public authorizeAndPost(userIdentity: string, message: string, authorId: string, liveliness: bigint = BigInt(100)): Ledger {
     // Step 1: Create user hash
     const userHash = this.createUserHash(userIdentity);
     
     // Step 2: Authority issues credential
     const authoritySignature = this.issueCredential(userHash);
     
-    // Step 3: Create credential
-    const credential = this.createCredential(userHash, authoritySignature);
+    // Step 3: Create credential with specified liveliness
+    const credential = this.createCredential(userHash, authoritySignature, liveliness);
     
     // Step 4: Post message with credential
     return this.post(message, authorId, credential);
+  }
+
+  // Helper method to get the minimum liveliness requirement from ledger
+  public getMinLiveliness(): bigint {
+    return this.getLedger().min_liveliness;
+  }
+
+  // Helper method to check if a user hash has been used before
+  public isCredentialUsed(userHash: Uint8Array): boolean {
+    return this.getLedger().used_credentials.member(userHash);
+  }
+
+  // Helper method to check if a nonce has been used before
+  public isNonceUsed(nonce: Uint8Array): boolean {
+    return this.getLedger().used_nonces.member(nonce);
+  }
+
+  // Helper method to check if an author has posted before
+  public hasAuthorPosted(authorBytes: Uint8Array): boolean {
+    return this.getLedger().authors.member(authorBytes);
   }
 }
