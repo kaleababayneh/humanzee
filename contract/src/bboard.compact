@@ -151,22 +151,25 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   assert(c_bytes15 != default<Bytes<15>>, "Challenge bytes cannot be zero");
   const c_field: Field = c_bytes15 as Field;
   assert(c_field != 0, "Challenge cannot be zero");
-  
-  // Step 3: Re-enable the elliptic curve operations for signature verification
+
+  // // Step 3: Re-enable the elliptic curve operations for signature verification
   const lhs: CurvePoint = ecMulGenerator(s);
+
   const c_pk: CurvePoint = ecMul(pk, c_field);
+
   const rhs: CurvePoint = ecAdd(R, c_pk);
+
   assert(lhs == rhs, "Authority signature verification failed");
-  
+  // assert(false, "this is the last test");
   // Mark nonce and credential as used
-  used_nonces.insert(nonce);
-  used_credentials.insert(user_hash);
+  //used_nonces.insert(nonce);
+  //used_credentials.insert(user_hash);
 }
 
 // Post a message with authority-signed credential
 export circuit post(newMessage: Opaque<"string">, newAuthor: Bytes<132>, credential: AuthorityCredential): [] {
   // Verify the authority credential
-  //verify_credential(credential);
+  verify_credential(credential);
   
   // Create the verified post
   const new_post = Post {
@@ -177,12 +180,13 @@ export circuit post(newMessage: Opaque<"string">, newAuthor: Bytes<132>, credent
   };
   
   // Add post to the list
-  posts.pushFront(new_post);
+  //posts.pushFront(new_post);
   
   // Add author to authors set (automatically handles duplicates)
-  authors.insert(disclose(newAuthor));
-  
+  //authors.insert(disclose(newAuthor));
+
   sequence.increment(1);
+  assert(false, "are we doing this really");
 }
 
 // Get authority public key
