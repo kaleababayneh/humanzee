@@ -29,13 +29,15 @@ interface SimpleBoardProps {
   onCreateBoard?: () => void;
   onJoinBoard?: (address: string) => void;
   isConnecting?: boolean; // Add loading state prop
+  faceRecognitionAvailable?: boolean; // Add face recognition availability
 }
 
 export const SimpleBoard: React.FC<SimpleBoardProps> = ({ 
   deployedBoardAPI, 
   onCreateBoard, 
   onJoinBoard,
-  isConnecting = false
+  isConnecting = false,
+  faceRecognitionAvailable = false
 }) => {
   const [userName, setUserName] = useState('');
   const [liveliness, setLiveliness] = useState<number>(100); // Will be set by face scan
@@ -269,15 +271,15 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                 <Button
                   variant="contained"
                   onClick={handleSignIn}
-                  disabled={!userName.trim()}
+                  disabled={!userName.trim() || !faceRecognitionAvailable}
                   startIcon={<SecurityIcon />}
                 >
-                  Face Scan
+                  Real Face Scan
                 </Button>
               </Stack>
               <Typography variant="caption" color="text.secondary">
                 Enter your name, then proceed to biometric face scan for authentication.
-                Liveliness will be automatically detected during the scan.
+                Real camera with liveness detection will be used.
               </Typography>
             </Stack>
           </CardContent>

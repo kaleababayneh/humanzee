@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Typography, Container } from '@mui/material';
+import { Box, Typography, Container, Alert } from '@mui/material';
 import { SimpleBoard } from './components/SimpleBoard';
 import { useDeployedBoardContext } from './hooks';
 import { type BoardDeployment } from './contexts';
+import { loadModels } from './utils/faceRecognition';
+import { initDB } from './utils/storageService';
 
 /**
  * The root bulletin board application component.
@@ -11,6 +13,29 @@ const App: React.FC = () => {
   const boardApiProvider = useDeployedBoardContext();
   const [currentBoard, setCurrentBoard] = useState<BoardDeployment | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [faceModelsLoaded, setFaceModelsLoaded] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  // Initialize face recognition on app start
+  useEffect(() => {
+    const initializeFaceRecognition = async () => {
+      try {
+        console.log('🔄 Initializing face recognition...');
+        await loadModels();
+        await initDB();
+        setFaceModelsLoaded(true);
+        console.log('✅ Face recognition initialized successfully');
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('❌ Face recognition initialization failed:', error);
+        throw new Error(`Face recognition failed to load: ${errorMessage}`);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
+    initializeFaceRecognition();
+  }, []);
 
   const handleCreateBoard = () => {
     setIsConnecting(true);
@@ -77,13 +102,39 @@ const App: React.FC = () => {
           </Typography>
         </Box>
 
-        {/* Main content */}
+        {/* Face Recognition Status */}
+        {isInitializing && (
+          <Alert 
+            severity="info" 
+            sx={{ mb: 2, maxWidth: 600, mx: 'auto' }}
+          >
+            🔄 Initializing face recognition models...
+            <br />
+            <Typography variant="caption">
+              Loading neural networks for real-time face detection and biometric analysis.
+            </Typography>
+          </Alert>
+        )}
+        
+        {faceModelsLoaded && !isInitializing && (
+          <Alert 
+            severity="success" 
+            sx={{ mb: 2, maxWidth: 600, mx: 'auto' }}
+          >
+            🔐 Real face recognition enabled with biometric security
+          </Alert>
+        )}
+
+        {/* Main content - only show when face recognition is ready */}
+        {!isInitializing && (
         <SimpleBoard
           deployedBoardAPI={currentBoard?.status === 'deployed' ? currentBoard.api : undefined}
           onCreateBoard={handleCreateBoard}
           onJoinBoard={handleJoinBoard}
           isConnecting={isConnecting}
+          faceRecognitionAvailable={faceModelsLoaded}
         />
+        )}
       </Container>
     </Box>
   );

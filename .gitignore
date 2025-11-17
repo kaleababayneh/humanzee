@@ -39,7 +39,7 @@ jspm_packages/
 
 # dotenv environment variables file
 .env
-
+facething
 # Configuration files with sensitive data
 api/src/config.ts
 

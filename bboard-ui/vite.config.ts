@@ -17,7 +17,6 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
-// import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -30,7 +29,16 @@ export default defineConfig({
         manualChunks: {
           // Separate chunk for WASM modules to avoid top-level await issues
           wasm: ['@midnight-ntwrk/onchain-runtime'],
+          // Separate chunk for face-api.js to handle its dependencies
+          faceapi: ['face-api.js'],
         },
+      },
+      external: (id) => {
+        // Externalize Node.js modules that face-api.js tries to import
+        if (id === 'fs' || id === 'path') {
+          return true;
+        }
+        return false;
       },
     },
     commonjsOptions: {
@@ -83,7 +91,7 @@ export default defineConfig({
       },
     },
     // Explicitly include these packages for pre-bundling, but force ESM
-    include: ['@midnight-ntwrk/compact-runtime'],
+    include: ['@midnight-ntwrk/compact-runtime', 'face-api.js', 'idb'],
     // Exclude WASM files and modules with top-level await from optimization
     exclude: [
       '@midnight-ntwrk/onchain-runtime',
@@ -91,9 +99,16 @@ export default defineConfig({
       '@midnight-ntwrk/onchain-runtime/midnight_onchain_runtime_wasm.js',
     ],
   },
-  define: {},
+  define: {
+    global: 'globalThis',
+  },
   // Add specific import configuration for more control
   resolve: {
+    alias: {
+      // Prevent face-api.js from trying to use Node.js fs module
+      'fs': '/dev/null',
+      'path': '/dev/null',
+    },
     // Ensure WASM files are loaded properly
     extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json', '.wasm'],
     mainFields: ['browser', 'module', 'main'],
