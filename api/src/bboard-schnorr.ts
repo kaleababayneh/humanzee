@@ -1,10 +1,3 @@
-/**
- * Bulletin Board Authority Credential Signer
- * 
- * This module provides a simplified interface for authority credential issuance
- * using the bulletin board contract's signing mechanisms.
- */
-
 import {
   QueryContext,
   sampleContractAddress,
@@ -54,19 +47,8 @@ const getAuthoritySecretKey = (): Uint8Array => {
   try {
     const keyBytes = hexToBytes(config.authority.secretKey);
     console.log('✅ Successfully loaded authority key from config');
-    console.log(`🔐 Authority key preview: ${bytesToHex(keyBytes).slice(0, 16)}...`);
     return keyBytes;
   } catch (error) {
-    console.error('❌ Failed to load authority key from config:', error);
-    
-    // Fallback for development - NEVER use in production!
-    if (config.environment !== 'production') {
-      console.warn('⚠️  Using hardcoded authority secret key for development!');
-      console.warn('⚠️  Update config.ts with a proper key for production!');
-      const fallbackKey = new Uint8Array(32).fill(0x11);
-      console.log(`🔧 Development fallback key: ${bytesToHex(fallbackKey).slice(0, 16)}...`);
-      return fallbackKey;
-    }
     
     throw new Error(`
 ❌ Failed to load authority secret key from config.ts!
@@ -290,55 +272,3 @@ export const prepareMessagePost = (userIdentity: string, authorId: string, autho
   const signer = createAuthoritySigner(authorityKey);
   return signer.preparePostingData(userIdentity, authorId, liveliness);
 };
-
-/**
- * Demo function to show the credential issuance workflow
- */
-export const demo = (): void => {
-  console.log("🔐 Bulletin Board Authority Credential Demo");
-  
-  // Create authority signer
-  const authority = createDefaultAuthoritySigner();
-  const authorityPk = authority.getAuthorityPublicKey();
-  
-  console.log("\n📊 Authority Public Key:");
-  console.log({
-    x: authorityPk.x.toString(16),
-    y: authorityPk.y.toString(16)
-  });
-  
-  // Issue credential for a user - LONGER INPUT TO AVOID ZERO BYTES
-  const userIdentity = "kaleababayneh@example.com.test.user.identity.full.length.string.to.avoid.zero.bytes";
-  const authorId = "kaleababayneh_full_author_name_to_fill_bytes";
-  
-  console.log(`\n👤 Issuing credential for: ${userIdentity}`);
-  const liveliness = BigInt(75); // Example liveliness value
-  const postingData = authority.preparePostingData(userIdentity, authorId, liveliness);
-  
-  console.log("\n📝 User Hash:", bytesToHex(postingData.userHash));
-  console.log("🔐 Authority Signature:");
-  console.log({
-    R: { 
-      x: postingData.credential.authority_signature.R.x.toString(16), 
-      y: postingData.credential.authority_signature.R.y.toString(16) 
-    },
-    s: postingData.credential.authority_signature.s.toString(16),
-    nonce: bytesToHex(postingData.credential.authority_signature.nonce),
-  });
-  
-  // Verify the credential
-  const isValid = authority.verifyCredential(postingData.credential);
-  console.log("\n✅ Credential valid:", isValid);
-  
-  console.log("\n🎯 Credential ready for bulletin board posting!");
-  console.log(`📧 User: ${userIdentity}`);
-  console.log(`✍️  Author: ${authorId}`);
-  console.log(`📄 Author bytes length: ${postingData.authorBytes.length}`);
-  
-  console.log("\n💡 This credential can now be used to post messages to the bulletin board!");
-};
-
-demo();  // Run demo on module load
-
-// Demo functionality available for testing
-export const runDemo = demo;
