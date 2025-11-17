@@ -19,8 +19,10 @@ import PersonIcon from '@mui/icons-material/Person';
 import MessageIcon from '@mui/icons-material/Message';
 import SendIcon from '@mui/icons-material/Send';
 import EditIcon from '@mui/icons-material/Edit';
+import SecurityIcon from '@mui/icons-material/Security';
 import { type DeployedBBoardAPI, type BBoardDerivedState } from '../../../api/src/index';
 import { type Post } from '../../../contract/src/index';
+import { FaceScan } from './FaceScan';
 
 interface SimpleBoardProps {
   deployedBoardAPI?: DeployedBBoardAPI;
@@ -36,8 +38,11 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
   isConnecting = false
 }) => {
   const [userName, setUserName] = useState('');
-  const [liveliness, setLiveliness] = useState<number>(100); // Default to max value
+  const [liveliness, setLiveliness] = useState<number>(100); // Will be set by face scan
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [isBiometricVerified, setIsBiometricVerified] = useState(false);
+  const [faceId, setFaceId] = useState<string>('');
+  const [showFaceScan, setShowFaceScan] = useState(false);
   const [message, setMessage] = useState('');
   const [boardState, setBoardState] = useState<BBoardDerivedState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -64,29 +69,63 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
   const handleSignIn = useCallback(() => {
     if (!userName.trim() || !deployedBoardAPI) return;
 
-    // For now, just mark as signed in - we'll create credentials when posting
-    setIsSignedIn(true);
+    // Start biometric authentication flow
+    setShowFaceScan(true);
     setError('');
-    
-    // Prefill message editor with a signed hint
-    setMessage((prev) => prev && prev.trim() !== '' ? prev : `Signed by ${userName}`);
   }, [userName, deployedBoardAPI]);
+
+  const handleFaceScanComplete = useCallback((result: {
+    success: boolean;
+    liveliness: number;
+    faceId: string;
+    error?: string;
+  }) => {
+    setShowFaceScan(false);
+    
+    if (result.success) {
+      setIsBiometricVerified(true);
+      setIsSignedIn(true);
+      setLiveliness(result.liveliness);
+      setFaceId(result.faceId);
+      setError('');
+      
+      // Prefill message editor with a signed hint
+      setMessage((prev) => prev && prev.trim() !== '' ? prev : `Verified by ${userName} (Liveliness: ${result.liveliness}%)`);
+    } else {
+      setError(result.error || 'Biometric verification failed');
+      setIsBiometricVerified(false);
+      setIsSignedIn(false);
+    }
+  }, [userName]);
+
+  const handleFaceScanCancel = useCallback(() => {
+    setShowFaceScan(false);
+    setError('');
+  }, []);
 
   const handleSignOut = useCallback(() => {
     setIsSignedIn(false);
+    setIsBiometricVerified(false);
     setUserName('');
     setMessage('');
     setLiveliness(100); // Reset to default
+    setFaceId('');
+    setError('');
   }, []);
 
   const handlePostMessage = useCallback(async () => {
-    if (!deployedBoardAPI || !message.trim() || !userName.trim()) return;
+    if (!deployedBoardAPI || !message.trim() || !userName.trim() || !isBiometricVerified) return;
 
     setIsLoading(true);
     setError('');
 
     try {
-      console.log('📤 Posting message using authorizeAndPost', { message, author: userName, liveliness });
+      console.log('📤 Posting message using authorizeAndPost', { 
+        message, 
+        author: userName, 
+        liveliness,
+        faceId: faceId.slice(0, 16) + '...'
+      });
 
       // Use the same method that works in CLI - authorizeAndPost now accepts liveliness parameter
       await deployedBoardAPI.authorizeAndPost(userName, message, userName, BigInt(liveliness));
@@ -98,7 +137,7 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [deployedBoardAPI, userName, message, liveliness]);
+  }, [deployedBoardAPI, userName, message, liveliness, isBiometricVerified, faceId]);
 
   const handleCreateBoard = useCallback(() => {
     setError('');
@@ -183,20 +222,37 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
           subheader={`Contract: ${(deployedBoardAPI.deployedContractAddress)}`}
           action={
             isSignedIn ? (
-              <Chip
-                icon={<PersonIcon />}
-                label={userName}
-                onDelete={handleSignOut}
-                color="primary"
-                variant="outlined"
-              />
+              <Stack direction="row" spacing={1}>
+                <Chip
+                  icon={<SecurityIcon />}
+                  label={`Liveliness: ${liveliness}%`}
+                  color={liveliness >= 85 ? 'success' : liveliness >= 75 ? 'warning' : 'default'}
+                  size="small"
+                />
+                <Chip
+                  icon={<PersonIcon />}
+                  label={userName}
+                  onDelete={handleSignOut}
+                  color="primary"
+                  variant="outlined"
+                />
+              </Stack>
             ) : null
           }
         />
       </Card>
 
+      {/* Face Scan Authentication */}
+      {showFaceScan && (
+        <FaceScan
+          userName={userName}
+          onScanComplete={handleFaceScanComplete}
+          onCancel={handleFaceScanCancel}
+        />
+      )}
+
       {/* Sign in section */}
-      {!isSignedIn && (
+      {!isSignedIn && !showFaceScan && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Stack spacing={2}>
@@ -210,27 +266,18 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                   sx={{ flexGrow: 1 }}
                   onKeyPress={(e) => e.key === 'Enter' && handleSignIn()}
                 />
-                <TextField
-                  label="Liveliness"
-                  type="number"
-                  value={liveliness}
-                  onChange={(e) => setLiveliness(Math.max(1, Math.min(100, Number(e.target.value))))}
-                  size="small"
-                  inputProps={{ min: 1, max: 100 }}
-                  sx={{ width: '120px' }}
-                  helperText="1-100"
-                />
                 <Button
                   variant="contained"
                   onClick={handleSignIn}
-                  disabled={!userName.trim() }
-                  startIcon={isLoading ? <CircularProgress size={16} /> : <EditIcon />}
+                  disabled={!userName.trim()}
+                  startIcon={<SecurityIcon />}
                 >
-                  {'Sign'}
+                  Face Scan
                 </Button>
               </Stack>
               <Typography variant="caption" color="text.secondary">
-                Liveliness determines credential freshness (higher = more live, max 100)
+                Enter your name, then proceed to biometric face scan for authentication.
+                Liveliness will be automatically detected during the scan.
               </Typography>
             </Stack>
           </CardContent>
@@ -238,8 +285,12 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
       )}
 
       {/* Post message section */}
-      {isSignedIn && (
+      {isSignedIn && isBiometricVerified && (
         <Card sx={{ mb: 3 }}>
+          <CardHeader 
+            title="📝 Compose Message"
+            subheader={`Authenticated: ${userName} | Face ID: ${faceId.slice(0, 16)}... | Liveliness: ${liveliness}%`}
+          />
           <CardContent>
             <Stack spacing={2}>
               <TextField
