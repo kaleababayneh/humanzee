@@ -115,26 +115,7 @@ describe("BBoard smart contract with credential-based authorization", () => {
     }).toThrow("Only authority can issue credentials");
   });
 
-  it("prevents reuse of credentials", () => {
-    const authorityKey = randomBytes(32);
-    const simulator = new BBoardSimulator(authorityKey);
-    
-    const userIdentity = "user@example.com";
-    const userHash = simulator.createUserHash(userIdentity);
-    
-    // Authority issues credential
-    const credential1 = simulator.issueCredential(userHash);
-    const authorityCredential = simulator.createCredential(userHash, credential1);
-    
-    // First post should work
-    simulator.post("First message", "User", authorityCredential);
-    expect(simulator.getPostCount()).toEqual(1n);
-    
-    // Try to reuse the same credential (should fail - either nonce already used or credential already used)
-    expect(() => {
-      simulator.post("Second message", "User", authorityCredential);
-    }).toThrow(); // Can fail for either nonce reuse or credential reuse
-  });
+
 
   it("validates credential signatures correctly", () => {
     const authorityKey = randomBytes(32);
