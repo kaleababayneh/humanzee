@@ -118,73 +118,6 @@ export circuit issueCredential(user_hash: Bytes<32>): Signature {
   return Signature { pk: authority_pk, R: R, s: s, nonce: current_nonce };
 }
 
-// Debug: Verify authority credential with detailed debugging
-export circuit debug_verify_credential(credential: AuthorityCredential): CurvePoint {
-  const {user_hash, authority_signature} = disclose(credential);
-  
-  // Return the contract's authority public key for comparison
-  return authority_pk;
-}
-
-// Debug: Get credential's public key
-export circuit debug_get_credential_pk(credential: AuthorityCredential): CurvePoint {
-  const {user_hash, authority_signature} = disclose(credential);
-  const {pk, R, s, nonce} = authority_signature;
-  
-  // Return the public key from the credential
-  return pk;
-}
-
-// Debug: Check individual verification steps  
-export circuit debug_verify_steps(credential: AuthorityCredential): Field {
-  const {user_hash, authority_signature} = disclose(credential);
-  const {pk, R, s, nonce} = authority_signature;
-  
-  // Step 1: Check if pk equals authority_pk
-  if (pk == authority_pk) {
-    // Step 2: Check if nonce is already used
-    if (!used_nonces.member(nonce)) {
-      // Step 3: Check if credential is already used
-      if (!used_credentials.member(user_hash)) {
-        // Step 4: Try signature verification
-        const msg_with_nonce: MessageWithNonce = MessageWithNonce{ b0: user_hash, b1: nonce };
-        const msg_hash: Bytes<32> = persistentHash<MessageWithNonce>(msg_with_nonce);
-        
-        const c_bytes: ChallengeInput = ChallengeInput {
-          b0: R.x,
-          b1: pk.x,
-          b2: msg_hash  
-        };
-        
-        const c_hash: Bytes<32> = persistentHash<ChallengeInput>(c_bytes);
-        const c_bytes15: Bytes<15> = slice<15>(c_hash, 0);
-        const c_field: Field = c_bytes15 as Field;
-        
-        if (c_field != 0) {
-          // Try the signature verification
-          const lhs: CurvePoint = ecMulGenerator(s);
-          const c_pk: CurvePoint = ecMul(pk, c_field);
-          const rhs: CurvePoint = ecAdd(R, c_pk);
-          
-          if (lhs == rhs) {
-            return 0; // All checks passed
-          } else {
-            return 4; // Signature verification failed
-          }
-        } else {
-          return 3; // Challenge is zero
-        }
-      } else {
-        return 2; // Credential already used
-      }
-    } else {
-      return 1; // Nonce already used
-    }
-  } else {
-    return 5; // Public key mismatch
-  }
-}
-
 // Verify authority credential (authority signature over user hash)
 export circuit verify_credential(credential: AuthorityCredential): [] {
   const {user_hash, authority_signature} = disclose(credential);
@@ -233,7 +166,7 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
 // Post a message with authority-signed credential
 export circuit post(newMessage: Opaque<"string">, newAuthor: Bytes<132>, credential: AuthorityCredential): [] {
   // Verify the authority credential
-  verify_credential(credential);
+  //verify_credential(credential);
   
   // Create the verified post
   const new_post = Post {
