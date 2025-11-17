@@ -231,14 +231,27 @@ const mainLoop = async (providers: BBoardProviders, rli: Interface, logger: Logg
           const message = await rli.question(`What message do you want to post? `);
           const userIdentity = await rli.question(`Enter user identity (e.g., user@example.com): `);
           const authorName = await rli.question(`Enter author display name: `);
+          const livelinessInput = await rli.question(`Enter liveliness value (1-100, default 100): `);
+          
+          // Parse liveliness input with validation
+          let liveliness = BigInt(100); // Default value
+          if (livelinessInput.trim()) {
+            const parsed = parseInt(livelinessInput.trim());
+            if (isNaN(parsed) || parsed < 1 || parsed > 100) {
+              logger.warn(`Invalid liveliness value "${livelinessInput}". Using default value 100.`);
+            } else {
+              liveliness = BigInt(parsed);
+            }
+          }
           
           logger.info(`📝 Posting message: "${message}"`);
           logger.info(`👤 User identity: ${userIdentity}`);
           logger.info(`✍️  Author name: ${authorName}`);
+          logger.info(`💯 Liveliness: ${liveliness}`);
           
           try {
             logger.info(`🔐 Creating authority credential for user...`);
-            await bboardApi.authorizeAndPost(userIdentity, message, authorName);
+            await bboardApi.authorizeAndPost(userIdentity, message, authorName, liveliness);
             logger.info('✅ Message posted successfully!');
           } catch (error) {
             logger.error(`❌ Failed to post message:`);

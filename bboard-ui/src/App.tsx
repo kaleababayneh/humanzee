@@ -25,31 +25,38 @@ import { type BoardDeployment } from './contexts';
 const App: React.FC = () => {
   const boardApiProvider = useDeployedBoardContext();
   const [currentBoard, setCurrentBoard] = useState<BoardDeployment | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   const handleCreateBoard = () => {
+    setIsConnecting(true);
     const boardDeployment$ = boardApiProvider.resolve();
     
     boardDeployment$.subscribe({
       next: (deployment) => {
         setCurrentBoard(deployment);
+        setIsConnecting(false);
       },
       error: (error) => {
         console.error('Failed to create board:', error);
         setCurrentBoard({ status: 'failed', error });
+        setIsConnecting(false);
       }
     });
   };
 
   const handleJoinBoard = (contractAddress: string) => {
+    setIsConnecting(true);
     const boardDeployment$ = boardApiProvider.resolve(contractAddress);
     
     boardDeployment$.subscribe({
       next: (deployment) => {
         setCurrentBoard(deployment);
+        setIsConnecting(false);
       },
       error: (error) => {
         console.error('Failed to join board:', error);
         setCurrentBoard({ status: 'failed', error });
+        setIsConnecting(false);
       }
     });
   };
@@ -90,6 +97,7 @@ const App: React.FC = () => {
           deployedBoardAPI={currentBoard?.status === 'deployed' ? currentBoard.api : undefined}
           onCreateBoard={handleCreateBoard}
           onJoinBoard={handleJoinBoard}
+          isConnecting={isConnecting}
         />
       </Container>
     </Box>

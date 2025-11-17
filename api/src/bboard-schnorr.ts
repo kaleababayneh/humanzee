@@ -122,13 +122,15 @@ export class BBoardAuthoritySigner {
    * Create a complete authority credential
    * 
    * @param userHash The user's identity hash
+   * @param liveliness The liveliness value (should be ≤ 100)
    * @returns Complete credential with user hash and authority signature
    */
-  createCredential(userHash: Uint8Array): AuthorityCredential {
+  createCredential(userHash: Uint8Array, liveliness: bigint = BigInt(100)): AuthorityCredential {
     const authoritySignature = this.issueCredential(userHash);
     
     return {
       user_hash: userHash,
+      liveliness: liveliness,
       authority_signature: authoritySignature,
     };
   }
@@ -137,11 +139,12 @@ export class BBoardAuthoritySigner {
    * Create credential from identity string (convenience method)
    * 
    * @param identity User identity string
+   * @param liveliness The liveliness value (should be ≤ 100)
    * @returns Complete credential
    */
-  createCredentialFromIdentity(identity: string): AuthorityCredential {
+  createCredentialFromIdentity(identity: string, liveliness: bigint = BigInt(100)): AuthorityCredential {
     const userHash = this.createUserHash(identity);
-    return this.createCredential(userHash);
+    return this.createCredential(userHash, liveliness);
   }
 
   /**
@@ -170,13 +173,13 @@ export class BBoardAuthoritySigner {
    * @param authorId Author name for display
    * @returns Object with credential and author bytes ready for posting
    */
-  preparePostingData(userIdentity: string, authorId: string): {
+  preparePostingData(userIdentity: string, authorId: string, liveliness: bigint = BigInt(100)): {
     credential: AuthorityCredential;
     authorBytes: Uint8Array;
     userHash: Uint8Array;
   } {
     const userHash = this.createUserHash(userIdentity);
-    const credential = this.createCredential(userHash);
+    const credential = this.createCredential(userHash, liveliness);
     const authorBytes = this.createAuthorBytes(authorId);
     
     return {
@@ -251,13 +254,13 @@ export const issueCredentialForUser = (identity: string, authorityKey?: Uint8Arr
   return signer.createCredentialFromIdentity(identity);
 };
 
-export const prepareMessagePost = (userIdentity: string, authorId: string, authorityKey?: Uint8Array): {
+export const prepareMessagePost = (userIdentity: string, authorId: string, authorityKey?: Uint8Array, liveliness: bigint = BigInt(100)): {
   credential: AuthorityCredential;
   authorBytes: Uint8Array;
   userHash: Uint8Array;
 } => {
   const signer = createAuthoritySigner(authorityKey);
-  return signer.preparePostingData(userIdentity, authorId);
+  return signer.preparePostingData(userIdentity, authorId, liveliness);
 };
 
 /**
@@ -281,7 +284,8 @@ export const demo = (): void => {
   const authorId = "kaleababayneh_full_author_name_to_fill_bytes";
   
   console.log(`\n👤 Issuing credential for: ${userIdentity}`);
-  const postingData = authority.preparePostingData(userIdentity, authorId);
+  const liveliness = BigInt(75); // Example liveliness value
+  const postingData = authority.preparePostingData(userIdentity, authorId, liveliness);
   
   console.log("\n📝 User Hash:", bytesToHex(postingData.userHash));
   console.log("🔐 Authority Signature:");

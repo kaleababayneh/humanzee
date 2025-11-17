@@ -13,6 +13,7 @@ export struct Signature {
 // Authority credential signature (authority signs user hashes)
 export struct AuthorityCredential {
   user_hash: Bytes<32>;
+  liveliness: Field;
   authority_signature: Signature;
 }
 
@@ -48,6 +49,7 @@ export ledger sequence: Counter;
 export ledger used_nonces: Set<Bytes<32>>;
 export ledger used_credentials: Set<Bytes<32>>; // Track used user hashes to prevent reuse
 export ledger authority_pk: CurvePoint;
+export ledger min_liveliness: Field;
 
 // Witnesses for private data
 witness localSecretKey(): Bytes<32>;
@@ -56,6 +58,7 @@ constructor() {
   // Initialize with the deployer's public key as the authority
   const sk = disclose(localSecretKey());
   authority_pk = derive_pk(sk);
+  min_liveliness = 60;
 }
 
 // Derive public key from private key
@@ -120,7 +123,8 @@ export circuit issueCredential(user_hash: Bytes<32>): Signature {
 
 // Verify authority credential (authority signature over user hash)
 export circuit verify_credential(credential: AuthorityCredential): [] {
-  const {user_hash, authority_signature} = disclose(credential);
+  const {user_hash, liveliness, authority_signature} = disclose(credential);
+  assert(liveliness as Uint<8> > min_liveliness as Uint<8>, "credential is not lively");
   const {pk, R, s, nonce} = authority_signature;
   
   // Step 1: Basic assertions work fine

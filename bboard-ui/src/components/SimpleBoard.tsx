@@ -20,25 +20,27 @@ import MessageIcon from '@mui/icons-material/Message';
 import SendIcon from '@mui/icons-material/Send';
 import EditIcon from '@mui/icons-material/Edit';
 import { type DeployedBBoardAPI, type BBoardDerivedState } from '../../../api/src/index';
-import { type Post, type AuthorityCredential, type Signature } from '../../../contract/src/index';
+import { type Post } from '../../../contract/src/index';
 
 interface SimpleBoardProps {
   deployedBoardAPI?: DeployedBBoardAPI;
   onCreateBoard?: () => void;
   onJoinBoard?: (address: string) => void;
+  isConnecting?: boolean; // Add loading state prop
 }
 
 export const SimpleBoard: React.FC<SimpleBoardProps> = ({ 
   deployedBoardAPI, 
   onCreateBoard, 
-  onJoinBoard 
+  onJoinBoard,
+  isConnecting = false
 }) => {
   const [userName, setUserName] = useState('');
+  const [liveliness, setLiveliness] = useState<number>(100); // Default to max value
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [message, setMessage] = useState('');
   const [boardState, setBoardState] = useState<BBoardDerivedState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [credential, setCredential] = useState<AuthorityCredential | null>(null);
   const [error, setError] = useState<string>('');
   const [contractAddress, setContractAddress] = useState('');
 
@@ -62,78 +64,32 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
   const handleSignIn = useCallback(() => {
     if (!userName.trim() || !deployedBoardAPI) return;
 
-    // Sign the user identity using the authority (issueCredential) and keep the credential
-    (async () => {
-      setIsLoading(true);
-      setError('');
-      try {
-        // Create user hash via API helper if available
-        const userHash = deployedBoardAPI.createUserHash
-          ? deployedBoardAPI.createUserHash(userName)
-          : (() => {
-              const encoder = new TextEncoder();
-              const encoded = encoder.encode(userName);
-              const bytes = new Uint8Array(32);
-              bytes.set(encoded.slice(0, Math.min(encoded.length, 32)));
-              return bytes;
-            })();
-
-        // Request authority signature
-        const sig: Signature = await deployedBoardAPI.issueCredential(userHash);
-
-        // Create a full credential object (API helper if available)
-        const cred: AuthorityCredential = deployedBoardAPI.createCredential
-          ? deployedBoardAPI.createCredential(userHash, sig)
-          : { user_hash: userHash, authority_signature: sig };
-
-        // Store credential and mark signed in
-        console.log('🔐 Issued credential:', cred);
-        setCredential(cred);
-        setIsSignedIn(true);
-
-        // Prefill message editor with a signed hint so user can post via wallet
-        setMessage((prev) => prev && prev.trim() !== '' ? prev : `Signed by ${userName}`);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to sign identity');
-      } finally {
-        setIsLoading(false);
-      }
-    })();
+    // For now, just mark as signed in - we'll create credentials when posting
+    setIsSignedIn(true);
+    setError('');
+    
+    // Prefill message editor with a signed hint
+    setMessage((prev) => prev && prev.trim() !== '' ? prev : `Signed by ${userName}`);
   }, [userName, deployedBoardAPI]);
 
   const handleSignOut = useCallback(() => {
     setIsSignedIn(false);
     setUserName('');
     setMessage('');
-  }, []);
-
-  const createAuthorBytes = useCallback((authorId: string) => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(authorId);
-    const authorBytes = new Uint8Array(132);
-    authorBytes.set(data.slice(0, Math.min(data.length, 132)));
-    return authorBytes;
+    setLiveliness(100); // Reset to default
   }, []);
 
   const handlePostMessage = useCallback(async () => {
     if (!deployedBoardAPI || !message.trim() || !userName.trim()) return;
 
-    if (!credential) {
-      setError('Please sign first before posting (click Sign).');
-      return;
-    }
-
     setIsLoading(true);
     setError('');
 
     try {
-      // Prepare author bytes from userName
-      const authorBytes = createAuthorBytes(userName);
+      console.log('📤 Posting message using authorizeAndPost', { message, author: userName, liveliness });
 
-      console.log('📤 Posting message to contract', { message, author: userName, credential });
-
-      // Call the lower-level post API which should trigger wallet/tx flow
-      await deployedBoardAPI.post(message, authorBytes, credential);
+      // Use the same method that works in CLI - authorizeAndPost now accepts liveliness parameter
+      await deployedBoardAPI.authorizeAndPost(userName, message, userName, BigInt(liveliness));
 
       // Clear message after successful post
       setMessage('');
@@ -142,17 +98,15 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [deployedBoardAPI, userName, message, credential, createAuthorBytes]);
+  }, [deployedBoardAPI, userName, message, liveliness]);
 
   const handleCreateBoard = useCallback(() => {
-    setIsLoading(true);
     setError('');
     onCreateBoard?.();
   }, [onCreateBoard]);
 
   const handleJoinBoard = useCallback(() => {
     if (!contractAddress.trim()) return;
-    setIsLoading(true);
     setError('');
     onJoinBoard?.(contractAddress);
   }, [contractAddress, onJoinBoard]);
@@ -183,8 +137,8 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
               size="large"
               fullWidth
               onClick={handleCreateBoard}
-              disabled={isLoading}
-              startIcon={isLoading ? <CircularProgress size={20} /> : <MessageIcon />}
+              disabled={isConnecting}
+              startIcon={isConnecting ? <CircularProgress size={20} /> : <MessageIcon />}
             >
               Create New Board
             </Button>
@@ -203,7 +157,7 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
               <Button
                 variant="outlined"
                 onClick={handleJoinBoard}
-                disabled={!contractAddress.trim() || isLoading}
+                disabled={!contractAddress.trim() || isConnecting}
               >
                 Join
               </Button>
@@ -226,7 +180,7 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
       <Card sx={{ mb: 3 }}>
         <CardHeader
           title="📋 Bulletin Board"
-          subheader={`Contract: ${getShortAddress(deployedBoardAPI.deployedContractAddress)}`}
+          subheader={`Contract: ${(deployedBoardAPI.deployedContractAddress)}`}
           action={
             isSignedIn ? (
               <Chip
@@ -245,24 +199,39 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
       {!isSignedIn && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
-            <Stack direction="row" spacing={2} alignItems="center">
-              <TextField
-                label="Your Name"
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
-                size="small"
-                placeholder="Enter your name..."
-                sx={{ flexGrow: 1 }}
-                onKeyPress={(e) => e.key === 'Enter' && handleSignIn()}
-              />
-              <Button
-                variant="contained"
-                onClick={handleSignIn}
-                disabled={!userName.trim()}
-                startIcon={<EditIcon />}
-              >
-                Sign In
-              </Button>
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={2} alignItems="center">
+                <TextField
+                  label="Your Name"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  size="small"
+                  placeholder="Enter your name..."
+                  sx={{ flexGrow: 1 }}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSignIn()}
+                />
+                <TextField
+                  label="Liveliness"
+                  type="number"
+                  value={liveliness}
+                  onChange={(e) => setLiveliness(Math.max(1, Math.min(100, Number(e.target.value))))}
+                  size="small"
+                  inputProps={{ min: 1, max: 100 }}
+                  sx={{ width: '120px' }}
+                  helperText="1-100"
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleSignIn}
+                  disabled={!userName.trim() }
+                  startIcon={isLoading ? <CircularProgress size={16} /> : <EditIcon />}
+                >
+                  {'Sign'}
+                </Button>
+              </Stack>
+              <Typography variant="caption" color="text.secondary">
+                Liveliness determines credential freshness (higher = more live, max 100)
+              </Typography>
             </Stack>
           </CardContent>
         </Card>

@@ -58,8 +58,8 @@ export interface DeployedBBoardAPI {
   
   // Helper functions
   createUserHash: (identity: string) => Uint8Array;
-  createCredential: (userHash: Uint8Array, authoritySignature: Signature) => AuthorityCredential;
-  authorizeAndPost: (userIdentity: string, message: string, authorId: string) => Promise<void>;
+  createCredential: (userHash: Uint8Array, authoritySignature: Signature, liveliness?: bigint) => AuthorityCredential;
+  authorizeAndPost: (userIdentity: string, message: string, authorId: string, liveliness?: bigint) => Promise<void>;
   
   // Query functions
   getPosts: () => Post[];
@@ -241,11 +241,13 @@ export class BBoardAPI implements DeployedBBoardAPI {
    *
    * @param userHash The user's identity hash.
    * @param authoritySignature The authority's signature on the user hash.
+   * @param liveliness The liveliness value (should be ≤ 100)
    * @returns An AuthorityCredential object.
    */
-  createCredential(userHash: Uint8Array, authoritySignature: Signature): AuthorityCredential {
+  createCredential(userHash: Uint8Array, authoritySignature: Signature, liveliness: bigint = BigInt(100)): AuthorityCredential {
     return {
       user_hash: userHash,
+      liveliness: liveliness,
       authority_signature: authoritySignature,
     };
   }
@@ -259,14 +261,14 @@ export class BBoardAPI implements DeployedBBoardAPI {
    * @param message The message to post.
    * @param authorName The author display name.
    */
-  async authorizeAndPost(userIdentity: string, message: string, authorName: string): Promise<void> {
+  async authorizeAndPost(userIdentity: string, message: string, authorName: string, liveliness: bigint = BigInt(100)): Promise<void> {
     // HARDCODE LONGER VALUES TO AVOID ZERO BYTES IN HASH
     const actualUserIdentity = "kaleababayneh@example.com.test.user.identity.full.length.string.to.avoid.zero.bytes";
     const actualAuthorName = "kaleababayneh_full_author_name_to_fill_bytes";
     
     this.logger?.info(`🔐 Authorizing and posting for user: ${actualUserIdentity}`);
     this.logger?.info(`⚠️  NOTE: Using hardcoded longer identity to avoid zero bytes in hash`);
-    this.logger?.info(`📝 Original input - User: "${userIdentity}", Author: "${authorName}"`);
+    this.logger?.info(`📝 Original input - User: "${userIdentity}", Author: "${authorName}", Liveliness: ${liveliness}`);
     this.logger?.info(`🔧 Actual values - User: "${actualUserIdentity}", Author: "${actualAuthorName}"`);
     
     try {
@@ -297,10 +299,10 @@ export class BBoardAPI implements DeployedBBoardAPI {
         this.logger?.error(`   CLI is using:    x=${localAuthorityPk.x.toString(16)}, y=${localAuthorityPk.y.toString(16)}`);
       }
       
-      // Use the authority signer to prepare posting data with hardcoded longer values
-      const postingData = prepareMessagePost(actualUserIdentity, actualAuthorName, privateState.secretKey);
+      // Use the authority signer to prepare posting data with hardcoded longer values and custom liveliness
+      const postingData = prepareMessagePost(actualUserIdentity, actualAuthorName, privateState.secretKey, liveliness);
       
-      this.logger?.info(`✅ Created credential for user: ${actualUserIdentity}`);
+      this.logger?.info(`✅ Created credential for user: ${actualUserIdentity} with liveliness: ${liveliness}`);
       this.logger?.info(`📊 Credential details:`);
       this.logger?.info(`   👤 User hash: ${toHex(postingData.userHash)}`);
       this.logger?.info(`   ✍️  Author bytes (132): ${toHex(postingData.authorBytes.slice(0, 20))}...`);
