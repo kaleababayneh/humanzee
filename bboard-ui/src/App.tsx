@@ -14,45 +14,84 @@
 // limitations under the License.
 
 import React, { useEffect, useState } from 'react';
-import { Box } from '@mui/material';
-import { MainLayout, Board } from './components';
+import { Box, Typography, Container } from '@mui/material';
+import { SimpleBoard } from './components/SimpleBoard';
 import { useDeployedBoardContext } from './hooks';
 import { type BoardDeployment } from './contexts';
-import { type Observable } from 'rxjs';
 
 /**
  * The root bulletin board application component.
- *
- * @remarks
- * The {@link App} component requires a `<DeployedBoardProvider />` parent in order to retrieve
- * information about current bulletin board deployments.
- *
- * @internal
  */
 const App: React.FC = () => {
   const boardApiProvider = useDeployedBoardContext();
-  const [boardDeployments, setBoardDeployments] = useState<Array<Observable<BoardDeployment>>>([]);
+  const [currentBoard, setCurrentBoard] = useState<BoardDeployment | null>(null);
 
-  useEffect(() => {
-    const subscription = boardApiProvider.boardDeployments$.subscribe(setBoardDeployments);
+  const handleCreateBoard = () => {
+    const boardDeployment$ = boardApiProvider.resolve();
+    
+    boardDeployment$.subscribe({
+      next: (deployment) => {
+        setCurrentBoard(deployment);
+      },
+      error: (error) => {
+        console.error('Failed to create board:', error);
+        setCurrentBoard({ status: 'failed', error });
+      }
+    });
+  };
 
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [boardApiProvider]);
+  const handleJoinBoard = (contractAddress: string) => {
+    const boardDeployment$ = boardApiProvider.resolve(contractAddress);
+    
+    boardDeployment$.subscribe({
+      next: (deployment) => {
+        setCurrentBoard(deployment);
+      },
+      error: (error) => {
+        console.error('Failed to join board:', error);
+        setCurrentBoard({ status: 'failed', error });
+      }
+    });
+  };
 
   return (
-    <Box sx={{ background: '#000', minHeight: '100vh' }}>
-      <MainLayout>
-        {boardDeployments.map((boardDeployment, idx) => (
-          <div data-testid={`board-${idx}`} key={`board-${idx}`}>
-            <Board boardDeployment$={boardDeployment} />
-          </div>
-        ))}
-        <div data-testid="board-start">
-          <Board />
-        </div>
-      </MainLayout>
+    <Box sx={{ 
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
+      minHeight: '100vh',
+      py: 2
+    }}>
+      <Container maxWidth="lg">
+        {/* Header */}
+        <Box textAlign="center" mb={4} py={3}>
+          <Typography 
+            variant="h3" 
+            component="h1" 
+            sx={{ 
+              color: 'white', 
+              fontWeight: 'bold',
+              textShadow: '2px 2px 4px rgba(0,0,0,0.3)'
+            }}
+          >
+            📋 Bulletin Board
+          </Typography>
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              color: 'rgba(255,255,255,0.8)', 
+              mt: 1 
+            }}
+          >
+            Decentralized messaging with zero-knowledge privacy
+          </Typography>
+        </Box>
+
+        {/* Main content */}
+        <SimpleBoard
+          deployedBoardAPI={currentBoard?.status === 'deployed' ? currentBoard.api : undefined}
+          onCreateBoard={handleCreateBoard}
+          onJoinBoard={handleJoinBoard}
+        />
+      </Container>
     </Box>
   );
 };

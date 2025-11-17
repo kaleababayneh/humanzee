@@ -180,13 +180,12 @@ export circuit post(newMessage: Opaque<"string">, newAuthor: Bytes<132>, credent
   };
   
   // Add post to the list
-  //posts.pushFront(new_post);
+  posts.pushFront(new_post);
   
   // Add author to authors set (automatically handles duplicates)
-  //authors.insert(disclose(newAuthor));
-
+  authors.insert(disclose(newAuthor));
   sequence.increment(1);
-  assert(false, "are we doing this really");
+  
 }
 
 // Get authority public key
