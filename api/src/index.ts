@@ -1,27 +1,5 @@
-// This file is part of midnightntwrk/example-counter.
-// Copyright (C) 2025 Midnight Foundation
-// SPDX-License-Identifier: Apache-2.0
-// Licensed under the Apache License, Version 2.0 (the "License");
-// You may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-/**
- * Provides types and utilities for working with bulletin board contracts.
- *
- * @packageDocumentation
- */
-
 import contractModule from '../../contract/src/managed/bboard/contract/index.cjs';
 const { Contract, ledger, pureCircuits } = contractModule;
-// import { Contract, ledger, pureCircuits, State } from '../../contract/src/index';
 
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { type Logger } from 'pino';
@@ -43,9 +21,6 @@ import { toHex } from '@midnight-ntwrk/midnight-js-utils';
 /** @internal */
 const bboardContractInstance: BBoardContract = new Contract(witnesses);
 
-/**
- * An API for a deployed bulletin board with credential-based authorization.
- */
 export interface DeployedBBoardAPI {
   readonly deployedContractAddress: ContractAddress;
   readonly state$: Observable<BBoardDerivedState>;
@@ -263,13 +238,12 @@ export class BBoardAPI implements DeployedBBoardAPI {
    */
   async authorizeAndPost(userIdentity: string, message: string, authorName: string, liveliness: bigint = BigInt(100)): Promise<void> {
     // HARDCODE LONGER VALUES TO AVOID ZERO BYTES IN HASH
-    const actualUserIdentity = "kaleababayneh@example.com.test.user.identity.full.length.string.to.avoid.zero.bytes";
-    const actualAuthorName = "kaleababayneh_full_author_name_to_fill_bytes";
+    //const actualUserIdentity = "kaleababayneh@example.com.test.user.identity.full.length.string.to.avoid.zero.bytes";
+    //const actualAuthorName = "kaleababayneh_full_author_name_to_fill_bytes";
     
-    this.logger?.info(`🔐 Authorizing and posting for user: ${actualUserIdentity}`);
     this.logger?.info(`⚠️  NOTE: Using hardcoded longer identity to avoid zero bytes in hash`);
     this.logger?.info(`📝 Original input - User: "${userIdentity}", Author: "${authorName}", Liveliness: ${liveliness}`);
-    this.logger?.info(`🔧 Actual values - User: "${actualUserIdentity}", Author: "${actualAuthorName}"`);
+    //this.logger?.info(`🔧 Actual values - User: "${actualUserIdentity}", Author: "${actualAuthorName}"`);
     
     try {
       // Get the current private state to use as authority key
@@ -300,9 +274,9 @@ export class BBoardAPI implements DeployedBBoardAPI {
       }
       
       // Use the authority signer to prepare posting data with hardcoded longer values and custom liveliness
-      const postingData = prepareMessagePost(actualUserIdentity, actualAuthorName, privateState.secretKey, liveliness);
+      const postingData = prepareMessagePost(userIdentity, authorName, privateState.secretKey, liveliness);
       
-      this.logger?.info(`✅ Created credential for user: ${actualUserIdentity} with liveliness: ${liveliness}`);
+      //this.logger?.info(`✅ Created credential for user: ${actualUserIdentity} with liveliness: ${liveliness}`);
       this.logger?.info(`📊 Credential details:`);
       this.logger?.info(`   👤 User hash: ${toHex(postingData.userHash)}`);
       this.logger?.info(`   ✍️  Author bytes (132): ${toHex(postingData.authorBytes.slice(0, 20))}...`);
@@ -324,7 +298,7 @@ export class BBoardAPI implements DeployedBBoardAPI {
       // Post the message with the credential
       await this.post(message, postingData.authorBytes, postingData.credential);
       
-      this.logger?.info(`🎉 Successfully posted message for user: ${actualUserIdentity}`);
+      //this.logger?.info(`🎉 Successfully posted message for user: ${actualUserIdentity}`);
       
     } catch (error) {
       this.logger?.error(`❌ Failed to authorize and post: ${error}`);
