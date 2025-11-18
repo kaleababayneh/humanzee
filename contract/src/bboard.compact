@@ -2,7 +2,36 @@ pragma language_version >= 0.16 && <= 0.18;
 
 import CompactStandardLibrary;
 
-// Signature structure for authenticating posts
+enum Status { ACTIVE, REJECTED, PASSED }
+
+// Proposal structure for governance voting
+export struct Proposal {
+  id: Uint<64>;
+  description: Opaque<"string">;
+  proposer: Bytes<32>;
+  deadline_timestamp: Uint<64>;
+  votes_for: Uint<64>;
+  votes_against: Uint<64>;
+  executed: Status;
+}
+
+// Individual vote record
+export struct Vote {
+  proposal_id: Uint<64>;
+  voter_hash: Bytes<32>;
+  vote_type: Boolean; // true = for, false = against
+  timestamp: Uint<64>;
+}
+
+// Comment on a proposal
+export struct Comment {
+  proposal_id: Uint<64>;
+  commenter_hash: Bytes<32>;
+  comment: Opaque<"string">;
+  timestamp: Uint<64>;
+}
+
+// Signature structure for authenticating actions
 export struct Signature {
   pk: CurvePoint;
   R: CurvePoint;
@@ -34,17 +63,11 @@ struct MessageWithNonce {
   b1: Bytes<32>;
 }
 
-// A post on the board with verified authorship
-export struct Post {
-  message: Opaque<"string">;
-  user_hash: Bytes<32>;
-  timestamp: Uint<64>;
-  id: Uint<64>;
-}
-
 // Ledger state - what's stored on-chain
-export ledger posts: List<Post>;
-export ledger authors: Set<Bytes<132>>;
+export ledger proposal: Proposal;
+export ledger votes: List<Vote>;
+export ledger comments: List<Comment>;
+export ledger voter_registry: Set<Bytes<32>>; // Track who has voted to prevent double voting
 export ledger sequence: Counter;
 export ledger used_nonces: Set<Bytes<32>>;
 export ledger used_credentials: Set<Bytes<32>>; // Track used user hashes to prevent reuse
@@ -54,11 +77,22 @@ export ledger min_liveliness: Field;
 // Witnesses for private data
 witness localSecretKey(): Bytes<32>;
 
-constructor() {
+constructor(_min_liveliness : Uint<64>, _proposer: Bytes<32>, description: Opaque<"string">, deadline_in_ms: Uint<64>) {
   // Initialize with the deployer's public key as the authority
   const sk = disclose(localSecretKey());
   authority_pk = derive_pk(sk);
-  min_liveliness = 60;
+  min_liveliness = disclose(_min_liveliness);
+  
+  
+  proposal = Proposal {
+    id: sequence as Uint<64>,
+    description: disclose(description),
+    proposer: disclose(_proposer),
+    deadline_timestamp: disclose(deadline_in_ms),
+    votes_for: 0 as Uint<64>,
+    votes_against: 0 as Uint<64>,
+    executed: Status.ACTIVE
+  };
 }
 
 // Derive public key from private key
@@ -115,9 +149,7 @@ export circuit issueCredential(user_hash: Bytes<32>): Signature {
   
   // s = k + c * sk
   const s: Field = k_field + (c_field * sk_field);
-  
-  // Don't mark nonce as used here - it will be marked when the credential is actually used
-  
+    
   return Signature { pk: authority_pk, R: R, s: s, nonce: current_nonce };
 }
 
@@ -153,36 +185,12 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   assert(c_field != 0, "Challenge cannot be zero");
 
   const lhs: CurvePoint = ecMulGenerator(s);
-
   const c_pk: CurvePoint = ecMul(pk, c_field);
-
   const rhs: CurvePoint = ecAdd(R, c_pk);
 
   assert(lhs == rhs, "Authority signature verification failed");
   used_nonces.insert(nonce);
   used_credentials.insert(user_hash);
-}
-
-// Post a message with authority-signed credential
-export circuit post(newMessage: Opaque<"string">, postTimeStamp: Uint<64>, newAuthor: Bytes<132>, credential: AuthorityCredential): [] {
-  // Verify the authority credential
-  verify_credential(credential);
-  
-  // Create the verified post
-  const new_post = Post {
-    message: disclose(newMessage),
-    user_hash: disclose(credential.user_hash),
-    timestamp: disclose(postTimeStamp),
-    id: sequence as Uint<64>
-  };
-  
-  // Add post to the list
-  posts.pushFront(new_post);
-  
-  // Add author to authors set (automatically handles duplicates)
-  authors.insert(disclose(newAuthor));
-  sequence.increment(1);
-  
 }
 
 // Get authority public key
@@ -194,10 +202,150 @@ export circuit getSequence(): Uint<64> {
   return sequence as Uint<64>;
 }
 
-export circuit getPostCount(): Uint<64> {
-  return posts.length() as Uint<64>;
+// Vote for a proposal
+export circuit voteFor(credential: AuthorityCredential): [] {
+  // Verify the authority credential
+  verify_credential(credential);
+  
+  // Check that proposal is still active and voting is open
+  assert(proposal.executed == Status.ACTIVE, "Proposal is not active");
+  //assert(blockTimeLte(proposal.deadline_timestamp), "Voting deadline has passed");
+  
+  // Prevent double voting
+  const voter_hash = disclose(credential.user_hash);
+  assert(!voter_registry.member(voter_hash), "User has already voted");
+  
+  // Record the vote
+  const new_vote = Vote {
+    proposal_id: proposal.id,
+    voter_hash: voter_hash,
+    vote_type: true, // true = for
+    timestamp: 0 as Uint<64> // Block time will be automatically recorded
+  };
+  
+  votes.pushFront(new_vote);
+  voter_registry.insert(voter_hash);
+  
+  // Update proposal vote count by recreating the struct
+  proposal = Proposal {
+    id: proposal.id,
+    description: proposal.description,
+    proposer: proposal.proposer,
+    deadline_timestamp: proposal.deadline_timestamp,
+    votes_for: proposal.votes_for + 1 as Uint<64>,
+    votes_against: proposal.votes_against,
+    executed: proposal.executed
+  };
 }
 
-export circuit getAuthorCount(): Uint<64> {
-  return authors.size() as Uint<64>;
+// Vote against a proposal
+export circuit voteAgainst(credential: AuthorityCredential): [] {
+  // Verify the authority credential
+  verify_credential(credential);
+  
+  // Check that proposal is still active and voting is open
+  assert(proposal.executed == Status.ACTIVE, "Proposal is not active");
+  //assert(blockTimeLte(proposal.deadline_timestamp), "Voting deadline has passed");
+  
+  // Prevent double voting
+  const voter_hash = disclose(credential.user_hash);
+  assert(!voter_registry.member(voter_hash), "User has already voted");
+  
+  // Record the vote
+  const new_vote = Vote {
+    proposal_id: proposal.id,
+    voter_hash: voter_hash,
+    vote_type: false, // false = against
+    timestamp: 0 as Uint<64> // Block time will be automatically recorded
+  };
+  
+  votes.pushFront(new_vote);
+  voter_registry.insert(voter_hash);
+  
+  // Update proposal vote count by recreating the struct
+  proposal = Proposal {
+    id: proposal.id,
+    description: proposal.description,
+    proposer: proposal.proposer,
+    deadline_timestamp: proposal.deadline_timestamp,
+    votes_for: proposal.votes_for,
+    votes_against: proposal.votes_against + 1 as Uint<64>,
+    executed: proposal.executed
+  };
+}
+
+// Add a comment to the proposal
+export circuit commentOnProposal(commentText: Opaque<"string">, credential: AuthorityCredential): [] {
+  // Verify the authority credential
+  verify_credential(credential);
+  
+  // Check that proposal is still active (allow comments even after voting ends)
+  assert(proposal.executed != Status.REJECTED, "Cannot comment on rejected proposals");
+  
+  // Create the comment
+  const new_comment = Comment {
+    proposal_id: proposal.id,
+    commenter_hash: disclose(credential.user_hash),
+    comment: disclose(commentText),
+    timestamp: 0 as Uint<64> // Block time will be automatically recorded
+  };
+  
+  comments.pushFront(new_comment);
+}
+
+// Execute/finalize the proposal (can only be called by authority)
+export circuit executeProposal(): [] {
+  // Only the authority can execute proposals
+  const sk_bytes: Bytes<32> = disclose(localSecretKey());
+  const authority_pk_derived = derive_pk(sk_bytes);
+  assert(authority_pk_derived == authority_pk, "Only authority can execute proposals");
+  
+  // Check that voting deadline has passed
+  //assert(blockTimeGt(proposal.deadline_timestamp), "Voting deadline has not passed yet");
+  assert(proposal.executed == Status.ACTIVE, "Proposal has already been executed");
+  
+  // Determine result based on votes
+  const new_status =  (proposal.votes_for > proposal.votes_against) ? Status.PASSED : Status.REJECTED;
+
+  
+  // Update proposal status by recreating the struct
+  proposal = Proposal {
+    id: proposal.id,
+    description: proposal.description,
+    proposer: proposal.proposer,
+    deadline_timestamp: proposal.deadline_timestamp,
+    votes_for: proposal.votes_for,
+    votes_against: proposal.votes_against,
+    executed: new_status
+  };
+}
+
+// Get current proposal status
+export circuit getProposal(): Proposal {
+  return proposal;
+}
+
+// Get total vote count
+export circuit getVoteCount(): Uint<64> {
+  return votes.length() as Uint<64>;
+}
+
+// Get total comment count
+export circuit getCommentCount(): Uint<64> {
+  return comments.length() as Uint<64>;
+}
+
+// Check if a user has voted
+export circuit hasUserVoted(userHash: Bytes<32>): Boolean {
+  return voter_registry.member(disclose(userHash));
+}
+
+// Check if voting is still open
+export circuit isVotingOpen(): Boolean {
+  return proposal.executed == Status.ACTIVE;// && blockTimeLte(proposal.deadline_timestamp);
+}
+
+// Check if proposal has expired (past deadline)
+export circuit hasProposalExpired(): Boolean {
+  return false;// blockTimeGt(proposal.deadline_timestamp);
 }

@@ -9,7 +9,9 @@ import {
   type Ledger,
   ledger,
   type Signature,
-  type Post,
+  type Proposal,
+  type Vote,
+  type Comment,
   type AuthorityCredential,
 } from "../managed/bboard/contract/index.cjs";
 import { type BBoardPrivateState, witnesses } from "../witnesses.js";
@@ -61,7 +63,13 @@ export class BBoardSimulator {
   readonly contract: Contract<BBoardPrivateState>;
   circuitContext: CircuitContext<BBoardPrivateState>;
 
-  constructor(authoritySecretKey: Uint8Array) {
+  constructor(
+    authoritySecretKey: Uint8Array,
+    minLiveliness: bigint = 60n,
+    proposer: Uint8Array = stringToBytes32("defaultProposer"),
+    description: string = "Test proposal for voting",
+    deadlineInMs: bigint = 86400000n // 1 day in milliseconds
+  ) {
     this.contract = new Contract<BBoardPrivateState>(witnesses);
     const {
       currentPrivateState,
@@ -69,6 +77,10 @@ export class BBoardSimulator {
       currentZswapLocalState,
     } = this.contract.initialState(
       constructorContext({ secretKey: authoritySecretKey }, "0".repeat(64)),
+      minLiveliness,
+      proposer,
+      description,
+      deadlineInMs
     );
     this.circuitContext = {
       currentPrivateState,
@@ -127,38 +139,75 @@ export class BBoardSimulator {
     return this.createCredential(userHash, authoritySignature, liveliness);
   }
 
-  // Post a message with authority credential
-  public post(message: string, authorId: string, credential: AuthorityCredential): Ledger {
-    const authorBytes = generateAuthorBytes(authorId);
-    
-    this.circuitContext = this.contract.impureCircuits.post(
+  // Vote for the proposal
+  public voteFor(credential: AuthorityCredential): Ledger {
+    this.circuitContext = this.contract.impureCircuits.voteFor(
       this.circuitContext,
-      message,
-      BigInt(Date.now()), // Use current timestamp
-      authorBytes,
       credential,
     ).context;
     
     return ledger(this.circuitContext.transactionContext.state);
   }
 
-  // Get all posts from the ledger
-  public getPosts(): Post[] {
-    const ledgerState = this.getLedger();
-    const posts: Post[] = [];
+  // Vote against the proposal
+  public voteAgainst(credential: AuthorityCredential): Ledger {
+    this.circuitContext = this.contract.impureCircuits.voteAgainst(
+      this.circuitContext,
+      credential,
+    ).context;
     
-    // Convert the posts iterator to an array
-    for (const post of ledgerState.posts) {
-      posts.push(post);
-    }
-    
-    return posts;
+    return ledger(this.circuitContext.transactionContext.state);
   }
 
-  // Get a specific post by ID
-  public getPost(postId: bigint): Post | undefined {
-    const posts = this.getPosts();
-    return posts.find(post => post.id === postId);
+  // Comment on the proposal
+  public commentOnProposal(comment: string, credential: AuthorityCredential): Ledger {
+    this.circuitContext = this.contract.impureCircuits.commentOnProposal(
+      this.circuitContext,
+      comment,
+      credential,
+    ).context;
+    
+    return ledger(this.circuitContext.transactionContext.state);
+  }
+
+  // Execute/finalize the proposal (authority only)
+  public executeProposal(): Ledger {
+    this.circuitContext = this.contract.impureCircuits.executeProposal(
+      this.circuitContext,
+    ).context;
+    
+    return ledger(this.circuitContext.transactionContext.state);
+  }
+
+  // Get current proposal
+  public getProposal(): Proposal {
+    return this.contract.circuits.getProposal(this.circuitContext).result;
+  }
+
+  // Get all votes from the ledger
+  public getVotes(): Vote[] {
+    const ledgerState = this.getLedger();
+    const votes: Vote[] = [];
+    
+    // Convert the votes iterator to an array
+    for (const vote of ledgerState.votes) {
+      votes.push(vote);
+    }
+    
+    return votes;
+  }
+
+  // Get all comments from the ledger
+  public getComments(): Comment[] {
+    const ledgerState = this.getLedger();
+    const comments: Comment[] = [];
+    
+    // Convert the comments iterator to an array
+    for (const comment of ledgerState.comments) {
+      comments.push(comment);
+    }
+    
+    return comments;
   }
 
   // Get sequence number
@@ -166,14 +215,14 @@ export class BBoardSimulator {
     return this.contract.circuits.getSequence(this.circuitContext).result;
   }
 
-  // Get post count
-  public getPostCount(): bigint {
-    return this.contract.circuits.getPostCount(this.circuitContext).result;
+  // Get vote count
+  public getVoteCount(): bigint {
+    return this.contract.circuits.getVoteCount(this.circuitContext).result;
   }
 
-  // Get author count
-  public getAuthorCount(): bigint {
-    return this.contract.circuits.getAuthorCount(this.circuitContext).result;
+  // Get comment count
+  public getCommentCount(): bigint {
+    return this.contract.circuits.getCommentCount(this.circuitContext).result;
   }
 
   // Get authority public key
@@ -202,8 +251,8 @@ export class BBoardSimulator {
     }
   }
 
-  // Full workflow: Authority issues credential and user posts
-  public authorizeAndPost(userIdentity: string, message: string, authorId: string, liveliness: bigint = BigInt(100)): Ledger {
+  // Full workflow: Authority issues credential and user votes
+  public authorizeAndVoteFor(userIdentity: string, liveliness: bigint = BigInt(100)): Ledger {
     // Step 1: Create user hash
     const userHash = this.createUserHash(userIdentity);
     
@@ -213,8 +262,38 @@ export class BBoardSimulator {
     // Step 3: Create credential with specified liveliness
     const credential = this.createCredential(userHash, authoritySignature, liveliness);
     
-    // Step 4: Post message with credential
-    return this.post(message, authorId, credential);
+    // Step 4: Vote for with credential
+    return this.voteFor(credential);
+  }
+
+  // Full workflow: Authority issues credential and user votes against
+  public authorizeAndVoteAgainst(userIdentity: string, liveliness: bigint = BigInt(100)): Ledger {
+    // Step 1: Create user hash
+    const userHash = this.createUserHash(userIdentity);
+    
+    // Step 2: Authority issues credential
+    const authoritySignature = this.issueCredential(userHash);
+    
+    // Step 3: Create credential with specified liveliness
+    const credential = this.createCredential(userHash, authoritySignature, liveliness);
+    
+    // Step 4: Vote against with credential
+    return this.voteAgainst(credential);
+  }
+
+  // Full workflow: Authority issues credential and user comments
+  public authorizeAndComment(userIdentity: string, comment: string, liveliness: bigint = BigInt(100)): Ledger {
+    // Step 1: Create user hash
+    const userHash = this.createUserHash(userIdentity);
+    
+    // Step 2: Authority issues credential
+    const authoritySignature = this.issueCredential(userHash);
+    
+    // Step 3: Create credential with specified liveliness
+    const credential = this.createCredential(userHash, authoritySignature, liveliness);
+    
+    // Step 4: Comment with credential
+    return this.commentOnProposal(comment, credential);
   }
 
   // Helper method to get the minimum liveliness requirement from ledger
@@ -233,7 +312,28 @@ export class BBoardSimulator {
   }
 
   // Helper method to check if an author has posted before
-  public hasAuthorPosted(authorBytes: Uint8Array): boolean {
-    return this.getLedger().authors.member(authorBytes);
+  public hasUserVoted(userHash: Uint8Array): boolean {
+    return this.contract.circuits.hasUserVoted(this.circuitContext, userHash).result;
+  }
+
+  // Helper method to check if voting is still open
+  public isVotingOpen(): boolean {
+    return this.contract.circuits.isVotingOpen(this.circuitContext).result;
+  }
+
+  // Helper method to check if proposal has expired
+  public hasProposalExpired(): boolean {
+    return this.contract.circuits.hasProposalExpired(this.circuitContext).result;
+  }
+
+  // Helper method to get voting statistics
+  public getVotingStats(): { forVotes: bigint, againstVotes: bigint, totalVotes: bigint, totalComments: bigint } {
+    const proposal = this.getProposal();
+    return {
+      forVotes: proposal.votes_for,
+      againstVotes: proposal.votes_against,
+      totalVotes: proposal.votes_for + proposal.votes_against,
+      totalComments: this.getCommentCount(),
+    };
   }
 }

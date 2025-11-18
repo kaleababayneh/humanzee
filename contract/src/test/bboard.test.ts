@@ -8,16 +8,16 @@ import { randomBytes } from "./utils.js";
 
 setNetworkId(NetworkId.Undeployed);
 
-describe("BBoard smart contract with credential-based authorization", () => {
+describe("BBoard smart contract credential system", () => {
   it("properly initializes ledger state and private state", () => {
     const authorityKey = randomBytes(32);
     const simulator = new BBoardSimulator(authorityKey);
     const initialLedgerState = simulator.getLedger();
     expect(initialLedgerState.sequence).toEqual(0n);
-    expect(initialLedgerState.posts.isEmpty()).toEqual(true);
-    expect(initialLedgerState.authors.isEmpty()).toEqual(true);
-    expect(simulator.getPostCount()).toEqual(0n);
-    expect(simulator.getAuthorCount()).toEqual(0n);
+    expect(initialLedgerState.votes.isEmpty()).toEqual(true);
+    expect(initialLedgerState.comments.isEmpty()).toEqual(true);
+    expect(simulator.getVoteCount()).toEqual(0n);
+    expect(simulator.getCommentCount()).toEqual(0n);
     
     const initialPrivateState = simulator.getPrivateState();
     expect(initialPrivateState.secretKey).toEqual(authorityKey);
@@ -29,78 +29,64 @@ describe("BBoard smart contract with credential-based authorization", () => {
     expect(authorityPk.y).toBeDefined();
   });
 
-  it("lets authority issue credentials and users post messages", () => {
+  it("lets authority issue credentials and users take actions", () => {
     const authorityKey = randomBytes(32);
     const simulator = new BBoardSimulator(authorityKey);
     
     const userIdentity = "user123@example.com";
-    const message = "Hello from the bulletin board!";
-    const authorId = "Alice";
     
-    // Authority issues credential and user posts message
-    simulator.authorizeAndPost(userIdentity, message, authorId);
+    // Authority issues credential and user votes
+    simulator.authorizeAndVoteFor(userIdentity);
     
     // Check the public ledger state
     const ledgerState = simulator.getLedger();
-    expect(ledgerState.sequence).toEqual(1n);
-    expect(ledgerState.posts.isEmpty()).toEqual(false);
-    expect(simulator.getPostCount()).toEqual(1n);
-    expect(simulator.getAuthorCount()).toEqual(1n);
+    expect(ledgerState.sequence).toEqual(0n); // Sequence only increments on certain actions
+    expect(ledgerState.votes.isEmpty()).toEqual(false);
+    expect(simulator.getVoteCount()).toEqual(1n);
     
-    // Get the posted message
-    const posts = simulator.getPosts();
-    expect(posts).toHaveLength(1);
-    const post = posts[0];
-    expect(post.message).toEqual(message);
-    expect(post.id).toEqual(0n);
-    expect(post.timestamp).toEqual(0n);
+    // Get the vote
+    const votes = simulator.getVotes();
+    expect(votes).toHaveLength(1);
+    const vote = votes[0];
+    expect(vote.vote_type).toEqual(true);
+    expect(vote.proposal_id).toEqual(0n);
   });
 
   it("lets authority authorize multiple users", () => {
     const authorityKey = randomBytes(32);
     const simulator = new BBoardSimulator(authorityKey);
     
-    // First user
-    simulator.authorizeAndPost("user1@example.com", "First message", "Alice");
-    
-    // Second user
-    simulator.authorizeAndPost("user2@example.com", "Second message", "Bob");
-    
-    // Third user
-    simulator.authorizeAndPost("user3@example.com", "Third message", "Charlie");
+    // Three users vote
+    simulator.authorizeAndVoteFor("user1@example.com");
+    simulator.authorizeAndVoteAgainst("user2@example.com");
+    simulator.authorizeAndVoteFor("user3@example.com");
     
     // Check ledger state
-    expect(simulator.getSequence()).toEqual(3n);
-    expect(simulator.getPostCount()).toEqual(3n);
-    expect(simulator.getAuthorCount()).toEqual(3n); // Three different authors
+    expect(simulator.getVoteCount()).toEqual(3n);
     
-    // Check posts
-    const posts = simulator.getPosts();
-    expect(posts).toHaveLength(3);
+    // Check votes
+    const votes = simulator.getVotes();
+    expect(votes).toHaveLength(3);
     
-    // Posts are added to front, so newest first
-    expect(posts[0].message).toEqual("Third message");
-    expect(posts[1].message).toEqual("Second message");
-    expect(posts[2].message).toEqual("First message");
+    // Votes are added to front, so newest first
+    expect(votes[0].vote_type).toEqual(true);  // user3 voted for
+    expect(votes[1].vote_type).toEqual(false); // user2 voted against
+    expect(votes[2].vote_type).toEqual(true);  // user1 voted for
   });
 
-  it("authority can issue multiple credentials for the same user", () => {
+  it("authority can issue multiple credentials for different users", () => {
     const authorityKey = randomBytes(32);
     const simulator = new BBoardSimulator(authorityKey);
     
-    const userIdentity = "user@example.com";
+    // Different users get credentials for different actions
+    simulator.authorizeAndVoteFor("user1@example.com");
+    simulator.authorizeAndComment("user2@example.com", "My comment");
     
-    // Same user gets multiple credentials (different posts)
-    simulator.authorizeAndPost(userIdentity, "First post", "User");
-    
-    // Note: The current system prevents reuse of the same credential
-    // So we'd need a different user hash for each post
-    simulator.authorizeAndPost("user@example.com-post2", "Second post", "User");
-    
-    expect(simulator.getPostCount()).toEqual(2n);
+    expect(simulator.getVoteCount()).toEqual(1n);
+    expect(simulator.getCommentCount()).toEqual(1n);
   });
 
-  it("prevents unauthorized users from posting without credentials", () => {
+  it("prevents unauthorized users from issuing credentials", () => {
     const authorityKey = randomBytes(32);
     const userKey = randomBytes(32);
     const simulator = new BBoardSimulator(authorityKey);
@@ -114,8 +100,6 @@ describe("BBoard smart contract with credential-based authorization", () => {
       simulator.issueCredential(userHash);
     }).toThrow("Only authority can issue credentials");
   });
-
-
 
   it("validates credential signatures correctly", () => {
     const authorityKey = randomBytes(32);
@@ -159,23 +143,23 @@ describe("BBoard smart contract with credential-based authorization", () => {
     expect(hash1).not.toEqual(hash3);
   });
 
-  it("maintains proper sequence and prevents nonce reuse", () => {
+  it("maintains proper nonce tracking and prevents credential reuse", () => {
     const authorityKey = randomBytes(32);
     const simulator = new BBoardSimulator(authorityKey);
     
     // Issue multiple credentials
-    simulator.authorizeAndPost("user1@example.com", "Message 1", "User1");
-    simulator.authorizeAndPost("user2@example.com", "Message 2", "User2");
-    simulator.authorizeAndPost("user3@example.com", "Message 3", "User3");
+    simulator.authorizeAndVoteFor("user1@example.com");
+    simulator.authorizeAndComment("user2@example.com", "Comment");
+    simulator.authorizeAndVoteAgainst("user3@example.com");
     
-    // Sequence should increment properly
-    expect(simulator.getSequence()).toEqual(3n);
+    // Check that nonces and credentials are being tracked
+    const ledgerState = simulator.getLedger();
+    expect(ledgerState.used_nonces.isEmpty()).toEqual(false);
+    expect(ledgerState.used_credentials.isEmpty()).toEqual(false);
     
-    // Each post should have unique IDs
-    const posts = simulator.getPosts();
-    const ids = posts.map(p => p.id);
-    const uniqueIds = new Set(ids);
-    expect(uniqueIds.size).toEqual(posts.length);
+    // Each action should have unique credentials
+    expect(simulator.getVoteCount()).toEqual(2n); // 2 votes
+    expect(simulator.getCommentCount()).toEqual(1n); // 1 comment
   });
 
   it("supports complex authorization workflow", () => {
@@ -191,13 +175,13 @@ describe("BBoard smart contract with credential-based authorization", () => {
     const authoritySignature = simulator.issueCredential(userHash);
     const credential = simulator.createCredential(userHash, authoritySignature);
     
-    // 3. User uses credential to post message
-    simulator.post("Authorized post from Alice", "Alice Johnson", credential);
+    // 3. User uses credential to vote
+    simulator.voteFor(credential);
     
-    // 4. Verify the post was created correctly
-    const posts = simulator.getPosts();
-    expect(posts).toHaveLength(1);
-    expect(posts[0].message).toEqual("Authorized post from Alice");
-    expect(posts[0].user_hash).toEqual(userHash);
+    // 4. Verify the vote was created correctly
+    const votes = simulator.getVotes();
+    expect(votes).toHaveLength(1);
+    expect(votes[0].vote_type).toEqual(true);
+    expect(votes[0].voter_hash).toEqual(userHash);
   });
 });
