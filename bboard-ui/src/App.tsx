@@ -68,16 +68,21 @@ const App: React.FC = () => {
   }, []);
 
   const handleCreateBoard = () => {
+    console.log('🚀 App: handleCreateBoard called');
     setIsConnecting(true);
+    console.log('🔄 App: Starting board deployment...');
     const boardDeployment$ = boardApiProvider.resolve();
     
     boardDeployment$.subscribe({
       next: (deployment) => {
+        console.log('📊 App: Board deployment status update:', deployment.status);
         setCurrentBoard(deployment);
-        setIsConnecting(false);
+        if (deployment.status !== 'in-progress') {
+          setIsConnecting(false);
+        }
       },
       error: (error) => {
-        console.error('Failed to create board:', error);
+        console.error('❌ App: Failed to create board:', error);
         setCurrentBoard({ status: 'failed', error });
         setIsConnecting(false);
       }

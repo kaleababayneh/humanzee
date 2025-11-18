@@ -127,26 +127,22 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   assert(liveliness as Uint<8> > min_liveliness as Uint<8>, "credential is not lively");
   const {pk, R, s, nonce} = authority_signature;
   
-  // Step 1: Basic assertions work fine
   assert(pk == authority_pk, "Credential not signed by authority");
   //assert(!used_nonces.member(nonce), "Nonce already used: replay attack detected");
   //assert(!used_credentials.member(user_hash), "User credential already used");
   
-  // Step 2: Add back hash operations with safer field handling
   const msg_with_nonce: MessageWithNonce = MessageWithNonce{ b0: user_hash, b1: nonce };
   const msg_hash: Bytes<32> = persistentHash<MessageWithNonce>(msg_with_nonce);
   
-  // Use authority_pk.x instead of pk.x to match signing exactly
   const R_x: Field = R.x;
   const authority_x: Field = authority_pk.x;
   
-  // Verify that the fields are not zero before using them
   assert(R_x != 0, "R.x cannot be zero");
   assert(authority_x != 0, "authority_pk.x cannot be zero");
   
   const c_bytes: ChallengeInput = ChallengeInput {
     b0: R_x,
-    b1: authority_x,  // Use authority_pk.x to match issueCredential exactly
+    b1: authority_x,  
     b2: msg_hash  
   };
   
@@ -156,7 +152,6 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   const c_field: Field = c_bytes15 as Field;
   assert(c_field != 0, "Challenge cannot be zero");
 
-  // // Step 3: Re-enable the elliptic curve operations for signature verification
   const lhs: CurvePoint = ecMulGenerator(s);
 
   const c_pk: CurvePoint = ecMul(pk, c_field);
@@ -164,13 +159,12 @@ export circuit verify_credential(credential: AuthorityCredential): [] {
   const rhs: CurvePoint = ecAdd(R, c_pk);
 
   assert(lhs == rhs, "Authority signature verification failed");
-  // Mark nonce and credential as used
-  //used_nonces.insert(nonce);
-  //used_credentials.insert(user_hash);
+  used_nonces.insert(nonce);
+  used_credentials.insert(user_hash);
 }
 
 // Post a message with authority-signed credential
-export circuit post(newMessage: Opaque<"string">, newAuthor: Bytes<132>, credential: AuthorityCredential): [] {
+export circuit post(newMessage: Opaque<"string">, postTimeStamp: Uint<64>, newAuthor: Bytes<132>, credential: AuthorityCredential): [] {
   // Verify the authority credential
   verify_credential(credential);
   
@@ -178,7 +172,7 @@ export circuit post(newMessage: Opaque<"string">, newAuthor: Bytes<132>, credent
   const new_post = Post {
     message: disclose(newMessage),
     user_hash: disclose(credential.user_hash),
-    timestamp: sequence as Uint<64>,
+    timestamp: disclose(postTimeStamp),
     id: sequence as Uint<64>
   };
   

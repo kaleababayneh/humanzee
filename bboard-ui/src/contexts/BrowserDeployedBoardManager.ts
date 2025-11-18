@@ -183,17 +183,43 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
 
   private async deployDeployment(deployment: BehaviorSubject<BoardDeployment>): Promise<void> {
     try {
+      console.log('🚀 Starting contract deployment...');
       const providers = await this.getProviders();
-      const api = await BBoardAPI.deploy(providers, this.logger);
+      console.log('✅ Providers initialized, calling BBoardAPI.deploy...');
+      
+      // First try with a shorter timeout to fail fast if there are network issues
+      const deploymentPromise = BBoardAPI.deploy(providers, this.logger);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('Contract deployment timed out after 120 seconds. This usually indicates network connectivity issues or the Midnight TestNet services are temporarily unavailable. Please try again later or check your internet connection.'));
+        }, 120000); // Increased to 120 seconds for better success rate
+      });
+      
+      const api = await Promise.race([deploymentPromise, timeoutPromise]);
+      console.log('✅ Contract deployment completed successfully');
 
       deployment.next({
         status: 'deployed',
         api,
       });
     } catch (error: unknown) {
+      console.error('❌ Contract deployment failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Provide more specific error messaging
+      let enhancedError = error instanceof Error ? error : new Error(errorMessage);
+      
+      if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
+        enhancedError = new Error('Network timeout: Unable to connect to Midnight TestNet services. This could be due to:\n• Slow internet connection\n• Midnight TestNet services being busy\n• Prover server being temporarily unavailable\n\nPlease wait a few minutes and try again.');
+      } else if (errorMessage.includes('fetch') || errorMessage.includes('network')) {
+        enhancedError = new Error('Network error: Unable to reach Midnight TestNet. Please check your internet connection and ensure you can access external websites.');
+      } else if (errorMessage.includes('proof') || errorMessage.includes('prover')) {
+        enhancedError = new Error('Proof generation failed: The proof server may be overloaded. Please wait a few minutes and try again.');
+      }
+      
       deployment.next({
         status: 'failed',
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: enhancedError,
       });
     }
   }
@@ -203,17 +229,32 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
     contractAddress: ContractAddress,
   ): Promise<void> {
     try {
+      console.log('🔗 Starting to join contract at address:', contractAddress);
       const providers = await this.getProviders();
-      const api = await BBoardAPI.join(providers, contractAddress, this.logger);
+      console.log('✅ Providers initialized, calling BBoardAPI.join...');
+      
+      // Add a timeout to the join process
+      const joinPromise = BBoardAPI.join(providers, contractAddress, this.logger);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('Contract join timed out after 60 seconds. Please check the contract address and your network connection.'));
+        }, 60000); // 60 second timeout
+      });
+      
+      const api = await Promise.race([joinPromise, timeoutPromise]);
+      console.log('✅ Contract join completed successfully');
 
       deployment.next({
         status: 'deployed',
         api,
       });
     } catch (error: unknown) {
+      console.error('❌ Contract join failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
       deployment.next({
         status: 'failed',
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: error instanceof Error ? error : new Error(errorMessage),
       });
     }
   }
@@ -221,13 +262,22 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
 
 /** @internal */
 const initializeProviders = async (logger: Logger): Promise<BBoardProviders> => {
+  console.log('🔧 Initializing providers...');
   const { wallet, uris } = await connectToWallet(logger);
+  console.log('✅ Wallet connected, getting wallet state...');
   const walletState = await wallet.state();
+  console.log('📋 Wallet state obtained');
   const zkConfigPath = window.location.origin; // '../../../contract/src/managed/bboard';
 
-  console.log(`Connecting to wallet with network ID: ${getLedgerNetworkId()}`);
+  console.log(`🌐 Connecting to wallet with network ID: ${getLedgerNetworkId()}`);
+  console.log('🔗 Service URIs:', {
+    prover: uris.proverServerUri,
+    indexer: uris.indexerUri,
+    indexerWs: uris.indexerWsUri,
+  });
 
-  return {
+  console.log('⚙️ Creating providers...');
+  const providers = {
     privateStateProvider: levelPrivateStateProvider({
       privateStateStoreName: 'bboard-private-state',
     }),
@@ -253,6 +303,9 @@ const initializeProviders = async (logger: Logger): Promise<BBoardProviders> => 
       },
     },
   };
+  
+  console.log('✅ All providers created successfully');
+  return providers;
 };
 
 /** @internal */
@@ -301,6 +354,11 @@ const connectToWallet = (logger: Logger): Promise<{ wallet: DAppConnectorWalletA
         const isEnabled = await connectorAPI.isEnabled();
 
         logger.info(isEnabled, 'Wallet connector API enabled status');
+        
+        // If wallet is not enabled, we need to trigger the popup
+        if (!isEnabled) {
+          logger.info('Wallet not enabled, triggering enable popup...');
+        }
 
         return connectorAPI;
       }),
@@ -313,7 +371,17 @@ const connectToWallet = (logger: Logger): Promise<{ wallet: DAppConnectorWalletA
             return new Error('Midnight Lace wallet has failed to respond. Extension enabled?');
           }),
       }),
-      concatMap(async (connectorAPI) => ({ walletConnectorAPI: await connectorAPI.enable(), connectorAPI })),
+      concatMap(async (connectorAPI) => {
+        logger.info('Attempting to enable wallet connector API...');
+        try {
+          const walletConnectorAPI = await connectorAPI.enable();
+          logger.info('Wallet connector API enabled successfully');
+          return { walletConnectorAPI, connectorAPI };
+        } catch (enableError) {
+          logger.error({ enableError: String(enableError) }, 'Failed to enable wallet connector API');
+          throw new Error('Failed to enable Midnight Lace wallet. Please check that the extension is unlocked and try again.');
+        }
+      }),
       catchError((error, apis) =>
         error
           ? throwError(() => {

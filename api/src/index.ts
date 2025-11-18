@@ -29,7 +29,7 @@ export interface DeployedBBoardAPI {
   issueCredential: (userHash: Uint8Array) => Promise<Signature>;
   
   // User operations
-  post: (message: string, authorBytes: Uint8Array, credential: AuthorityCredential) => Promise<void>;
+  post: (message: string, timestamp: bigint, authorBytes: Uint8Array, credential: AuthorityCredential) => Promise<void>;
   
   // Helper functions
   createUserHash: (identity: string) => Uint8Array;
@@ -155,18 +155,19 @@ export class BBoardAPI implements DeployedBBoardAPI {
    * Posts a message to the bulletin board with a valid authority credential.
    *
    * @param message The message to post.
+   * @param timestamp The timestamp for the post.
    * @param authorBytes The author identifier (132 bytes).
    * @param credential The authority credential required for posting.
    */
-  async post(message: string, authorBytes: Uint8Array, credential: AuthorityCredential): Promise<void> {
-    this.logger?.info(`📮 Posting message: "${message}" with credential`);
+  async post(message: string, timestamp: bigint, authorBytes: Uint8Array, credential: AuthorityCredential): Promise<void> {
+    this.logger?.info(`📮 Posting message: "${message}" with timestamp: ${timestamp} and credential`);
     this.logger?.info(`📏 Author bytes length: ${authorBytes.length} (expected: 132)`);
     
 
 
     try {
       this.logger?.info(`🔄 Calling contract post transaction...`);
-      const txData = await this.deployedContract.callTx.post(message, authorBytes, credential);
+      const txData = await this.deployedContract.callTx.post(message, timestamp, authorBytes, credential);
       
       this.logger?.info(`✅ Transaction submitted successfully!`);
       this.logger?.trace({
@@ -293,8 +294,9 @@ export class BBoardAPI implements DeployedBBoardAPI {
       
       this.logger?.info(`📝 Posting message: "${message}" with credential`);
       
-      // Post the message with the credential
-      await this.post(message, postingData.authorBytes, postingData.credential);
+      // Post the message with the credential (include current timestamp)
+      const currentTimestamp = BigInt(Math.floor(Date.now() / 1000)); // Current Unix timestamp
+      await this.post(message, currentTimestamp, postingData.authorBytes, postingData.credential);
       
       //this.logger?.info(`🎉 Successfully posted message for user: ${actualUserIdentity}`);
       

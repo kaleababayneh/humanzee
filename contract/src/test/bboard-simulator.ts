@@ -134,6 +134,7 @@ export class BBoardSimulator {
     this.circuitContext = this.contract.impureCircuits.post(
       this.circuitContext,
       message,
+      BigInt(Date.now()), // Use current timestamp
       authorBytes,
       credential,
     ).context;

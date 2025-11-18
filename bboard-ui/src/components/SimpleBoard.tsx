@@ -59,6 +59,8 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isBiometricVerified, setIsBiometricVerified] = useState(false);
   const [faceDescriptor, setFaceDescriptor] = useState<Float32Array | null>(null);
+  const [walletConnected, setWalletConnected] = useState<boolean>(false);
+  const [isConnectingWallet, setIsConnectingWallet] = useState<boolean>(false);
   const [showFaceScan, setShowFaceScan] = useState(false);
   const [message, setMessage] = useState('');
   const [boardState, setBoardState] = useState<BBoardDerivedState | null>(null);
@@ -82,6 +84,24 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
 
     return () => subscription.unsubscribe();
   }, [deployedBoardAPI]);
+
+  // Check wallet connection status on component mount
+  useEffect(() => {
+    const checkWalletConnection = async () => {
+      try {
+        const midnight = (window as any).midnight?.mnLace;
+        if (midnight) {
+          const isEnabled = await midnight.isEnabled();
+          setWalletConnected(isEnabled);
+          console.log('🔍 Wallet connection status:', isEnabled);
+        }
+      } catch (error) {
+        console.log('⚠️ Error checking wallet status:', error);
+      }
+    };
+
+    checkWalletConnection();
+  }, []);
 
   const handleSignIn = useCallback(() => {
     if (!deployedBoardAPI) return;
@@ -177,6 +197,40 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
     setError('');
     onCreateBoard?.();
   }, [onCreateBoard]);
+
+  // Add manual wallet connection function
+  const handleConnectWallet = useCallback(async () => {
+    setIsConnectingWallet(true);
+    setError('');
+    
+    try {
+      // Check if Midnight Lace wallet is available
+      const midnight = (window as any).midnight?.mnLace;
+      
+      if (!midnight) {
+        throw new Error('Midnight Lace wallet not found. Please install the Midnight Lace browser extension.');
+      }
+
+      console.log('🔗 Manually triggering wallet connection...');
+      
+      // Force enable the wallet (this should trigger the popup)
+      const walletAPI = await midnight.enable();
+      
+      if (walletAPI) {
+        setWalletConnected(true);
+        console.log('✅ Wallet connected successfully');
+      } else {
+        throw new Error('Failed to connect to wallet');
+      }
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown wallet connection error';
+      setError(`Wallet connection failed: ${errorMessage}`);
+      console.error('❌ Wallet connection error:', error);
+    } finally {
+      setIsConnectingWallet(false);
+    }
+  }, []);
 
   const handleJoinBoard = useCallback(() => {
     if (!contractAddress.trim()) return;
@@ -294,23 +348,65 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                           <Typography variant="body2" color="rgba(255, 255, 255, 0.7)" sx={{ mb: 3 }}>
                             Deploy a fresh bulletin board smart contract
                           </Typography>
-                          <Button
-                            variant="contained"
-                            size="large"
-                            fullWidth
-                            onClick={handleCreateBoard}
-                            disabled={isConnecting}
-                            startIcon={isConnecting ? <CircularProgress size={20} color="inherit" /> : <AddIcon />}
-                            sx={{ 
-                              py: 1.5,
-                              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                              '&:hover': {
-                                background: 'linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%)',
-                              },
-                            }}
-                          >
-                            {isConnecting ? 'Creating...' : 'Create Board'}
-                          </Button>
+                          
+                          {!walletConnected ? (
+                            <Stack spacing={2}>
+                              <Button
+                                variant="outlined"
+                                size="large"
+                                fullWidth
+                                onClick={handleConnectWallet}
+                                disabled={isConnectingWallet}
+                                startIcon={isConnectingWallet ? <CircularProgress size={20} color="inherit" /> : <SecurityIcon />}
+                                sx={{ 
+                                  py: 1.5,
+                                  borderColor: '#667eea',
+                                  color: '#667eea',
+                                  '&:hover': {
+                                    borderColor: '#667eea',
+                                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                  },
+                                }}
+                              >
+                                {isConnectingWallet ? 'Connecting...' : 'Connect Wallet First'}
+                              </Button>
+                              <Typography variant="caption" color="rgba(255, 255, 255, 0.6)" sx={{ textAlign: 'center' }}>
+                                🔒 Midnight Lace wallet required for deployment
+                              </Typography>
+                            </Stack>
+                          ) : (
+                            <Stack spacing={2}>
+                              <Alert 
+                                severity="success" 
+                                sx={{ 
+                                  background: 'rgba(16, 185, 129, 0.1)',
+                                  color: 'rgba(255, 255, 255, 0.9)',
+                                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                                }}
+                              >
+                                <Typography variant="body2">
+                                  ✅ Wallet Connected - Ready to deploy!
+                                </Typography>
+                              </Alert>
+                              <Button
+                                variant="contained"
+                                size="large"
+                                fullWidth
+                                onClick={handleCreateBoard}
+                                disabled={isConnecting}
+                                startIcon={isConnecting ? <CircularProgress size={20} color="inherit" /> : <AddIcon />}
+                                sx={{ 
+                                  py: 1.5,
+                                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                  '&:hover': {
+                                    background: 'linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%)',
+                                  },
+                                }}
+                              >
+                                {isConnecting ? 'Creating...' : 'Create Board'}
+                              </Button>
+                            </Stack>
+                          )}
                         </CardContent>
                       </Card>
                     
@@ -319,6 +415,7 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                   <Box sx={{ flex: 1 }}>
                     
                       <Card 
+                        id="join-board-section"
                         sx={{ 
                           height: '100%',
                           background: 'rgba(255, 255, 255, 0.1)',
@@ -409,6 +506,51 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                   
                 )}
 
+                {/* Show deployment progress */}
+                {currentBoard?.status === 'in-progress' && (
+                  
+                    <Alert 
+                      severity="info"
+                      sx={{ 
+                        width: '100%',
+                        background: 'rgba(59, 130, 246, 0.1)',
+                        backdropFilter: 'blur(10px)',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        color: 'rgba(255, 255, 255, 0.9)',
+                      }}
+                    >
+                      <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+                        <Stack direction="row" spacing={2} alignItems="center" sx={{ flex: 1 }}>
+                          <CircularProgress size={24} sx={{ color: '#60a5fa' }} />
+                          <Box>
+                            <Typography variant="body1" fontWeight={600} gutterBottom>
+                              🚀 Deploying Smart Contract
+                            </Typography>
+                            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                              Connecting to Midnight network and deploying contract... This may take up to 2 minutes.
+                            </Typography>
+                          </Box>
+                        </Stack>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => window.location.reload()}
+                          sx={{ 
+                            borderColor: 'rgba(255, 255, 255, 0.3)',
+                            color: 'rgba(255, 255, 255, 0.8)',
+                            '&:hover': {
+                              borderColor: 'rgba(255, 255, 255, 0.5)',
+                              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                            },
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </Stack>
+                    </Alert>
+                  
+                )}
+
                 {/* Show wallet connection errors */}
                 {currentBoard?.status === 'failed' && (
                   
@@ -423,16 +565,81 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                       }}
                     >
                       <Typography variant="body1" fontWeight={600} gutterBottom>
-                        Failed to connect to board
+                        Failed to {currentBoard.error.message.includes('join') ? 'join' : 'deploy'} board
                       </Typography>
-                      <Typography variant="body2">
+                      <Typography variant="body2" sx={{ mb: 2 }}>
                         {currentBoard.error.message}
                       </Typography>
+                      
+                      {/* Provide helpful suggestions based on error type */}
+                      {currentBoard.error.message.includes('timeout') && (
+                        <Stack spacing={1}>
+                          <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.7)' }}>
+                            💡 Network timeout occurred. This is common when:
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.7)', pl: 2 }}>
+                            • Midnight TestNet services are busy (peak hours)
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.7)', pl: 2 }}>
+                            • Your internet connection is slow
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.7)', pl: 2 }}>
+                            • Proof generation is taking longer than usual
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.7)', mt: 1 }}>
+                            🔄 Try waiting 2-3 minutes before retrying, or try joining an existing board instead.
+                          </Typography>
+                        </Stack>
+                      )}
                       {currentBoard.error.message.includes('wallet') && (
-                        <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
-                          💡 Make sure Midnight Lace wallet extension is installed and enabled
+                        <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.7)' }}>
+                          💡 Make sure Midnight Lace wallet extension is installed, unlocked, and connected to TestNet.
                         </Typography>
                       )}
+                      {currentBoard.error.message.includes('contract') && (
+                        <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.7)' }}>
+                          💡 Please verify the contract address is correct and the contract exists on the network.
+                        </Typography>
+                      )}
+                      
+                      <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => window.location.reload()}
+                          sx={{ 
+                            borderColor: 'rgba(255, 255, 255, 0.3)',
+                            color: 'rgba(255, 255, 255, 0.8)',
+                            '&:hover': {
+                              borderColor: 'rgba(255, 255, 255, 0.5)',
+                              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                            },
+                          }}
+                        >
+                          Try Again
+                        </Button>
+                        
+                        {currentBoard.error.message.includes('timeout') && (
+                          <Button
+                            variant="contained"
+                            size="small"
+                            onClick={() => {
+                              // Pre-fill with a test board address
+                              setContractAddress('0200f63f3698b690e1f5f63d6a5a09237ef2741107b1b4108da1ea7b4f7297687725');
+                              const element = document.getElementById('join-board-section');
+                              element?.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            sx={{ 
+                              background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)',
+                              '&:hover': {
+                                background: 'linear-gradient(135deg, #db2777 0%, #9d174d 100%)',
+                              },
+                            }}
+                          >
+                            Join Test Board Instead
+                          </Button>
+                        )}
+                      </Stack>
                     </Alert>
                   
                 )}

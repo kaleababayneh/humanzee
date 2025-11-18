@@ -18,15 +18,94 @@ const EYE_AR_THRESHOLD = 0.28;
 const HEAD_ROTATION_THRESHOLD = 0.3; // Minimum rotation required for detection
 const REQUIRED_ROTATION_ANGLE = 25; // Degrees
 
+// Face quality validation thresholds
+const MIN_FACE_SIZE = 0.15; // Minimum face size relative to image
+const MAX_FACE_ROTATION = 0.4; // Maximum allowed face rotation for valid detection
+const EYE_DISTANCE_THRESHOLD = 50; // Minimum distance between eyes for proper face detection
+
+export const validateFaceQuality = (
+  detection: faceapi.FaceDetection,
+  landmarks: faceapi.FaceLandmarks68,
+  imageWidth: number,
+  imageHeight: number
+): { isValid: boolean; reason?: string } => {
+  const positions = landmarks.positions;
+  
+  // Check face size
+  const faceArea = detection.box.width * detection.box.height;
+  const imageArea = imageWidth * imageHeight;
+  const faceRatio = faceArea / imageArea;
+  
+  if (faceRatio < MIN_FACE_SIZE) {
+    return { isValid: false, reason: 'Face too small - move closer to camera' };
+  }
+  
+  // Check if both eyes are detected with sufficient distance
+  const leftEyeCorner = positions[36];  // Left eye corner
+  const rightEyeCorner = positions[45]; // Right eye corner
+  
+  if (!leftEyeCorner || !rightEyeCorner) {
+    return { isValid: false, reason: 'Eyes not properly detected' };
+  }
+  
+  const eyeDistance = euclideanDistance(leftEyeCorner, rightEyeCorner);
+  if (eyeDistance < EYE_DISTANCE_THRESHOLD) {
+    return { isValid: false, reason: 'Face not fully visible - center your face in the circle' };
+  }
+  
+  // Check face rotation (both eyes should be roughly at same height)
+  const eyeHeightDiff = Math.abs(leftEyeCorner.y - rightEyeCorner.y);
+  const maxAllowedHeightDiff = eyeDistance * 0.2; // 20% of eye distance
+  
+  if (eyeHeightDiff > maxAllowedHeightDiff) {
+    return { isValid: false, reason: 'Keep your head straight - face the camera directly' };
+  }
+  
+  // Check if face is reasonably centered in the detection area
+  const faceCenter = {
+    x: detection.box.x + detection.box.width / 2,
+    y: detection.box.y + detection.box.height / 2
+  };
+  
+  const imageCenter = {
+    x: imageWidth / 2,
+    y: imageHeight / 2
+  };
+  
+  const centerDistance = Math.sqrt(
+    Math.pow(faceCenter.x - imageCenter.x, 2) + Math.pow(faceCenter.y - imageCenter.y, 2)
+  );
+  const maxCenterDistance = Math.min(imageWidth, imageHeight) * 0.25;
+  
+  if (centerDistance > maxCenterDistance) {
+    return { isValid: false, reason: 'Center your face in the circular area' };
+  }
+  
+  return { isValid: true };
+};
+
 export const detectEyeState = (
   landmarks: faceapi.FaceLandmarks68
-): EyeState => {
+): EyeState | null => {
   const positions = landmarks.positions;
 
   // Left eye landmarks (indices 36-41)
   const leftEye = positions.slice(36, 42);
   // Right eye landmarks (indices 42-47)
   const rightEye = positions.slice(42, 48);
+
+  // Validate that we have all eye landmarks
+  if (leftEye.length < 6 || rightEye.length < 6) {
+    return null; // Invalid eye detection
+  }
+
+  // Check if eye landmarks are reasonable (not all at same position)
+  const leftEyeVariance = calculateLandmarkVariance(leftEye);
+  const rightEyeVariance = calculateLandmarkVariance(rightEye);
+  
+  if (leftEyeVariance < 5 || rightEyeVariance < 5) {
+    return null; // Eyes not properly detected
+  }
 
   const leftEyeAR = calculateEyeAspectRatio(leftEye);
   const rightEyeAR = calculateEyeAspectRatio(rightEye);
@@ -38,6 +117,19 @@ export const detectEyeState = (
     leftEyeOpen: leftOpen,
     rightEyeOpen: rightOpen,
   };
+};
+
+const calculateLandmarkVariance = (landmarks: faceapi.Point[]): number => {
+  if (landmarks.length === 0) return 0;
+  
+  const avgX = landmarks.reduce((sum, p) => sum + p.x, 0) / landmarks.length;
+  const avgY = landmarks.reduce((sum, p) => sum + p.y, 0) / landmarks.length;
+  
+  const variance = landmarks.reduce((sum, p) => {
+    return sum + Math.pow(p.x - avgX, 2) + Math.pow(p.y - avgY, 2);
+  }, 0) / landmarks.length;
+  
+  return Math.sqrt(variance);
 };
 
 export const detectHeadPose = (
@@ -104,6 +196,7 @@ export class LivenessDetector {
   private blinkDetected = false;
   private leftRotationDetected = false;
   private rightRotationDetected = false;
+  private isValidQuality = true;
 
   reset() {
     this.eyeStateHistory = [];
@@ -114,7 +207,12 @@ export class LivenessDetector {
     console.log('🔄 Liveness detector reset');
   }
 
-  addFrame(eyeState: EyeState, headPose: HeadPose): boolean {
+  addFrame(eyeState: EyeState | null, headPose: HeadPose): boolean {
+    // Don't process invalid eye states
+    if (!eyeState) {
+      return false;
+    }
+    
     // Track eye states for blink detection
     const eyesClosed = !eyeState.leftEyeOpen && !eyeState.rightEyeOpen;
     this.eyeStateHistory.push(eyesClosed);
@@ -221,9 +319,17 @@ export class LivenessDetector {
   }
 
   getCurrentInstruction(): string {
+    if (!this.isValidQuality) {
+      return 'Position your face fully in the circle';
+    }
+    
     if (!this.blinkDetected) return 'Blink your eyes';
     if (!this.leftRotationDetected) return 'Turn your head left';
     if (!this.rightRotationDetected) return 'Turn your head right';
     return 'Liveness verification complete!';
+  }
+
+  setQualityValid(isValid: boolean) {
+    this.isValidQuality = isValid;
   }
 }
