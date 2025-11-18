@@ -31,6 +31,7 @@ import VerifiedIcon from '@mui/icons-material/Verified';
 import { keyframes } from '@emotion/react';
 import { type DeployedBBoardAPI, type BBoardDerivedState } from '../../../api/src/index';
 import { type Post } from '../../../contract/src/index';
+import { type BoardDeployment } from '../contexts';
 import { FaceScan } from './FaceScan';
 import { getFaceHashHex } from '../utils/faceRecognition';
 
@@ -40,6 +41,7 @@ interface SimpleBoardProps {
   onJoinBoard?: (address: string) => void;
   isConnecting?: boolean; // Add loading state prop
   faceRecognitionAvailable?: boolean; // Add face recognition availability
+  currentBoard?: BoardDeployment | null; // Add current board state for error handling
 }
 
 export const SimpleBoard: React.FC<SimpleBoardProps> = ({ 
@@ -47,7 +49,8 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
   onCreateBoard, 
   onJoinBoard,
   isConnecting = false,
-  faceRecognitionAvailable = false
+  faceRecognitionAvailable = false,
+  currentBoard = null
 }) => {
   // Remove userName state - no longer needed
   const [faceIdentity, setFaceIdentity] = useState<string>(''); // Face hash as identity
@@ -177,6 +180,14 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
 
   const handleJoinBoard = useCallback(() => {
     if (!contractAddress.trim()) return;
+    
+    // Basic validation for contract address format
+    if (contractAddress.length < 10) {
+      setError('Invalid contract address. Please enter a valid Midnight contract address.');
+      return;
+    }
+    
+    console.log('🚀 SimpleBoard: Calling onJoinBoard with address:', contractAddress);
     setError('');
     onJoinBoard?.(contractAddress);
   }, [contractAddress, onJoinBoard]);
@@ -328,6 +339,9 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                           <Typography variant="body2" color="rgba(255, 255, 255, 0.7)" sx={{ mb: 3 }}>
                             Connect to an existing smart contract
                           </Typography>
+                          <Typography variant="caption" color="rgba(255, 255, 255, 0.6)" sx={{ mb: 2, display: 'block' }}>
+                            💡 Get the contract address from someone who created a board, or copy it from the browser URL after creating your own board
+                          </Typography>
                           <Stack spacing={2}>
                             <TextField
                               label="Contract Address"
@@ -335,9 +349,11 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                               onChange={(e) => setContractAddress(e.target.value)}
                               fullWidth
                               size="medium"
-                              placeholder="0x..."
+                              placeholder="Paste contract address here..."
+                              helperText="Contract address should be provided by the board creator"
                               sx={{
                                 '& .MuiInputLabel-root': { color: 'rgba(255, 255, 255, 0.8)' },
+                                '& .MuiFormHelperText-root': { color: 'rgba(255, 255, 255, 0.6)' },
                                 '& .MuiOutlinedInput-root': {
                                   color: 'rgba(255, 255, 255, 0.9)',
                                   backgroundColor: 'rgba(255, 255, 255, 0.1)',
@@ -351,7 +367,7 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                               variant="outlined"
                               onClick={handleJoinBoard}
                               disabled={!contractAddress.trim() || isConnecting}
-                              startIcon={<LinkIcon />}
+                              startIcon={isConnecting ? <CircularProgress size={20} color="inherit" /> : <LinkIcon />}
                               sx={{ 
                                 py: 1.5,
                                 borderColor: '#ec4899',
@@ -360,9 +376,13 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                                   borderColor: '#ec4899',
                                   backgroundColor: 'rgba(236, 72, 153, 0.1)',
                                 },
+                                '&:disabled': {
+                                  borderColor: 'rgba(156, 163, 175, 0.3)',
+                                  color: 'rgba(156, 163, 175, 0.8)',
+                                },
                               }}
                             >
-                              Join Board
+                              {isConnecting ? 'Connecting to Wallet...' : 'Join Board'}
                             </Button>
                           </Stack>
                         </CardContent>
@@ -385,6 +405,34 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                       }}
                     >
                       {error}
+                    </Alert>
+                  
+                )}
+
+                {/* Show wallet connection errors */}
+                {currentBoard?.status === 'failed' && (
+                  
+                    <Alert 
+                      severity="error"
+                      sx={{ 
+                        width: '100%',
+                        background: 'rgba(239, 68, 68, 0.1)',
+                        backdropFilter: 'blur(10px)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        color: 'rgba(255, 255, 255, 0.9)',
+                      }}
+                    >
+                      <Typography variant="body1" fontWeight={600} gutterBottom>
+                        Failed to connect to board
+                      </Typography>
+                      <Typography variant="body2">
+                        {currentBoard.error.message}
+                      </Typography>
+                      {currentBoard.error.message.includes('wallet') && (
+                        <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                          💡 Make sure Midnight Lace wallet extension is installed and enabled
+                        </Typography>
+                      )}
                     </Alert>
                   
                 )}

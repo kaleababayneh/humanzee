@@ -85,16 +85,20 @@ const App: React.FC = () => {
   };
 
   const handleJoinBoard = (contractAddress: string) => {
+    console.log('🔄 Attempting to join board with address:', contractAddress);
     setIsConnecting(true);
     const boardDeployment$ = boardApiProvider.resolve(contractAddress);
     
     boardDeployment$.subscribe({
       next: (deployment) => {
+        console.log('📋 Board join deployment update:', deployment.status);
         setCurrentBoard(deployment);
-        setIsConnecting(false);
+        if (deployment.status !== 'in-progress') {
+          setIsConnecting(false);
+        }
       },
       error: (error) => {
-        console.error('Failed to join board:', error);
+        console.error('❌ Failed to join board:', error);
         setCurrentBoard({ status: 'failed', error });
         setIsConnecting(false);
       }
@@ -245,6 +249,7 @@ const App: React.FC = () => {
               onJoinBoard={handleJoinBoard}
               isConnecting={isConnecting}
               faceRecognitionAvailable={faceModelsLoaded}
+              currentBoard={currentBoard}
             />
           
         )}
