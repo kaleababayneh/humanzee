@@ -1,4 +1,4 @@
-# 🗳️ Biometric Voting System on Midnight Network
+# 🗳️ Biometric DAO Voting System on Midnight Network
 
 A secure, privacy-preserving voting application that uses **face recognition biometrics** for voter authentication on the **Midnight blockchain**. No manual identity input required - your face is your voting credential.
 
@@ -29,7 +29,8 @@ A secure, privacy-preserving voting application that uses **face recognition bio
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 18+ 
+
+- Node.js 18+
 - Midnight Lace Wallet Extension
 - Camera access for face recognition
 
@@ -122,6 +123,7 @@ contract.voteFor(credential) // or voteAgainst(credential)
 ## 🔑 Configuration
 
 ### Authority Setup
+
 Edit `api/src/config.ts` to set the authority private key:
 
 ```typescript
@@ -133,9 +135,11 @@ export const config = {
 ```
 
 ### Face Recognition Models
+
 Models are automatically downloaded to `bboard-ui/public/models/`:
+
 - TinyFaceDetector (face detection)
-- FaceLandmark68 (facial landmarks) 
+- FaceLandmark68 (facial landmarks)
 - FaceRecognition (face descriptors)
 - SSDMobileNet (alternative detector)
 
@@ -164,14 +168,16 @@ npm run build
 ## 🔒 Privacy & Security
 
 ### What's Protected
+
 - ✅ Voter identity (face hash only, not actual face data)
 - ✅ Vote secrecy (zero-knowledge proofs)
 - ✅ Anti-spoofing (liveness detection)
 - ✅ Cryptographic integrity (Schnorr signatures)
 
 ### What's Public
+
 - 📊 Vote counts and results
-- 🕒 Voting timestamps 
+- 🕒 Voting timestamps
 - 📝 Comments on proposals
 - 🔗 Contract state on blockchain
 
@@ -186,7 +192,7 @@ npm run build
 ## 🎯 Use Cases
 
 - **Corporate Governance**: Board member voting with biometric verification
-- **DAO Voting**: Decentralized organization proposals with identity verification  
+- **DAO Voting**: Decentralized organization proposals with identity verification
 - **Elections**: Secure voting with privacy preservation
 - **Polls & Surveys**: Anonymous voting with anti-fraud protection
 
@@ -195,21 +201,25 @@ npm run build
 ### Common Issues
 
 **Camera not working?**
+
 - Allow camera permissions in browser
 - Check browser security settings
 - Ensure good lighting for face detection
 
 **Wallet connection failed?**
+
 - Install Midnight Lace extension
 - Connect to TestNet network
 - Check wallet is unlocked
 
 **Face recognition not detecting?**
+
 - Position face clearly in camera view
 - Ensure adequate lighting
 - Follow liveness detection prompts (blink, turn head)
 
 **Contract deployment timeout?**
+
 - Wait 2-3 minutes for blockchain confirmation
 - Check Midnight TestNet status
 - Try joining existing board instead
