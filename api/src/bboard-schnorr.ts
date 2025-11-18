@@ -4,9 +4,9 @@ import {
   constructorContext,
 } from "@midnight-ntwrk/compact-runtime";
 
-import { Contract, pureCircuits } from "../../contract/src/managed/bboard/contract/index.cjs";
+import { Contract, pureCircuits } from "../../contract/src/schnorr/index.cjs";
 import { witnesses } from "../../contract/src/witnesses.js";
-import type { Signature, AuthorityCredential } from "../../contract/src/index";
+import type { Signature, AuthorityCredential } from "../../contract/src/schnorr/index.d.cts";
 import { config } from './config.js';
 
 // Utility functions
