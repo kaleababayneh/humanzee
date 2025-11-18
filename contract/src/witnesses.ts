@@ -15,5 +15,5 @@ export const witnesses = {
     Uint8Array,
   ] => {
     return [context.privateState, context.privateState.secretKey];
-  }, // Return the actual secret key from private state
+  }, 
 };

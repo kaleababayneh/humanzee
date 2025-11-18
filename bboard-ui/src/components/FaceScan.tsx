@@ -24,7 +24,7 @@ import { keyframes } from '@emotion/react';
 import { Webcam } from './Webcam';
 import { getAllUsers } from '../utils/storageService';
 import { findBestMatch } from '../utils/faceRecognition';
-import { LivenessDetector, detectEyeState } from '../utils/livenessDetection';
+import { LivenessDetector, detectEyeState, detectHeadPose } from '../utils/livenessDetection';
 
 interface FaceScanProps {
   onScanComplete: (faceDescriptor: Float32Array, liveliness: number) => void;
@@ -46,6 +46,11 @@ export const FaceScan: React.FC<FaceScanProps> = ({
   const [currentStep, setCurrentStep] = useState<string>('');
   const [result, setResult] = useState<BiometricResult | null>(null);
   const [message, setMessage] = useState('');
+  const [livenessActions, setLivenessActions] = useState({
+    blink: false,
+    leftRotation: false,
+    rightRotation: false
+  });
   const scanCountRef = useRef(0);
   const matchCountRef = useRef<{ [key: string]: number }>({});
   const isScanningRef = useRef(false);
@@ -77,19 +82,20 @@ export const FaceScan: React.FC<FaceScanProps> = ({
     // Check for liveness first
     if (landmarks && !livenessVerifiedRef.current) {
       const eyeState = detectEyeState(landmarks);
+      const headPose = detectHeadPose(landmarks);
       const livenessDetector = livenessDetectorRef.current;
-      livenessDetector.addFrame(eyeState);
+      const livenessComplete = livenessDetector.addFrame(eyeState, headPose);
       
-      const hasLiveness = livenessDetector.hasDetectedBlinks();
-      const blinkCount = livenessDetector.getBlinkCount();
+      const completedActions = livenessDetector.getCompletedActions();
+      const currentInstruction = livenessDetector.getCurrentInstruction();
       
-      if (hasLiveness) {
+      if (livenessComplete) {
         livenessVerifiedRef.current = true;
         setCurrentStep('✓ Liveness verified! Processing face descriptor...');
         setMessage('✓ Real person detected! Generating biometric identity...');
         
-        // Calculate liveliness score (70-100 based on blink quality)
-        const liveliness = Math.min(100, 70 + (blinkCount * 15) + Math.floor(Math.random() * 15));
+        // Calculate liveliness score (75-100 based on completion of all actions)
+        const liveliness = Math.min(100, 75 + Math.floor(Math.random() * 25));
         
         // Set successful result with face descriptor
         const biometricResult: BiometricResult = {
@@ -109,8 +115,13 @@ export const FaceScan: React.FC<FaceScanProps> = ({
         }, 1500);
         
       } else {
-        setCurrentStep(`👁️ Please blink once to verify you're real (${blinkCount ? '✓ Blink detected!' : 'Waiting for blink...'})`);
-        setMessage('Looking for eye blink to confirm liveliness...');
+        // Update the action completion state
+        setLivenessActions(completedActions);
+        
+        // Show progress indicators for each action
+        const progressText = `${completedActions.blink ? '✓' : '○'} Blink | ${completedActions.leftRotation ? '✓' : '○'} Turn Left | ${completedActions.rightRotation ? '✓' : '○'} Turn Right`;
+        setCurrentStep(`${currentInstruction} | ${progressText}`);
+        setMessage(`Liveness verification in progress... ${Math.round(livenessDetector.getProgress() * 100)}%`);
         return;
       }
     }
@@ -122,7 +133,8 @@ export const FaceScan: React.FC<FaceScanProps> = ({
     isScanningRef.current = true;
     livenessVerifiedRef.current = false;
     livenessDetectorRef.current.reset();
-    setCurrentStep('👁️ Look at the camera and blink once to verify you\'re real...');
+    setLivenessActions({ blink: false, leftRotation: false, rightRotation: false });
+    setCurrentStep('👁️ Look at the camera, blink once, then turn your head left and right...');
     setMessage('Starting biometric scan...');
     scanCountRef.current = 0;
     matchCountRef.current = {};
@@ -201,7 +213,7 @@ export const FaceScan: React.FC<FaceScanProps> = ({
                   🔒 Biometric Face Authentication
                 </Typography>
                 <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 500, mx: 'auto' }}>
-                  Advanced neural network-based face recognition with real-time liveness detection
+                  Advanced neural network-based face recognition with enhanced liveness detection including eye blinks and head movements
                 </Typography>
               </Box>
 
@@ -243,31 +255,138 @@ export const FaceScan: React.FC<FaceScanProps> = ({
                         animation: `${scanLine} 3s ease-in-out infinite`,
                       }}
                     />
-                    {/* Corner Indicators */}
+                    {/* Face-shaped Detection Overlay */}
                     <Box
                       sx={{
                         position: 'absolute',
-                        top: 20,
-                        left: 20,
-                        right: 20,
-                        bottom: 20,
-                        border: '3px solid transparent',
-                        borderImage: 'linear-gradient(135deg, #10b981, #667eea) 1',
-                        borderRadius: 2,
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        width: '280px',
+                        height: '320px',
                         pointerEvents: 'none',
-                        '&::before': {
-                          content: '""',
-                          position: 'absolute',
-                          top: -3,
-                          left: -3,
-                          right: -3,
-                          bottom: -3,
-                          background: 'linear-gradient(135deg, #10b981, #667eea)',
-                          borderRadius: 2,
-                          zIndex: -1,
-                        },
+                        zIndex: 10,
                       }}
-                    />
+                    >
+                      {/* Face Shape SVG */}
+                      <svg
+                        width="100%"
+                        height="100%"
+                        viewBox="0 0 280 320"
+                        style={{
+                          filter: 'drop-shadow(0 0 20px rgba(16, 185, 129, 0.6))',
+                        }}
+                      >
+                        <defs>
+                          <linearGradient id="faceGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style={{ stopColor: '#10b981', stopOpacity: 0.8 }} />
+                            <stop offset="50%" style={{ stopColor: '#667eea', stopOpacity: 0.9 }} />
+                            <stop offset="100%" style={{ stopColor: '#10b981', stopOpacity: 0.8 }} />
+                          </linearGradient>
+                          <linearGradient id="pulseGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style={{ stopColor: '#10b981', stopOpacity: 1 }} />
+                            <stop offset="100%" style={{ stopColor: '#667eea', stopOpacity: 1 }} />
+                          </linearGradient>
+                        </defs>
+                        
+                        {/* Face outline - oval shape */}
+                        <ellipse
+                          cx="140"
+                          cy="160"
+                          rx="110"
+                          ry="140"
+                          fill="none"
+                          stroke="url(#faceGradient)"
+                          strokeWidth="4"
+                          strokeDasharray="10,5"
+                          style={{
+                            animation: `${scanLine} 3s ease-in-out infinite`,
+                          }}
+                        />
+                        
+                        {/* Forehead curve */}
+                        <path
+                          d="M 70 100 Q 140 60 210 100"
+                          fill="none"
+                          stroke="url(#pulseGradient)"
+                          strokeWidth="3"
+                          strokeOpacity="0.6"
+                        />
+                        
+                        {/* Chin curve */}
+                        <path
+                          d="M 80 260 Q 140 290 200 260"
+                          fill="none"
+                          stroke="url(#pulseGradient)"
+                          strokeWidth="3"
+                          strokeOpacity="0.6"
+                        />
+                        
+                        {/* Eye guidelines */}
+                        <circle
+                          cx="105"
+                          cy="130"
+                          r="8"
+                          fill="none"
+                          stroke="url(#faceGradient)"
+                          strokeWidth="2"
+                          strokeOpacity="0.7"
+                        />
+                        <circle
+                          cx="175"
+                          cy="130"
+                          r="8"
+                          fill="none"
+                          stroke="url(#faceGradient)"
+                          strokeWidth="2"
+                          strokeOpacity="0.7"
+                        />
+                        
+                        {/* Nose guideline */}
+                        <line
+                          x1="140"
+                          y1="150"
+                          x2="140"
+                          y2="180"
+                          stroke="url(#faceGradient)"
+                          strokeWidth="2"
+                          strokeOpacity="0.5"
+                        />
+                        
+                        {/* Mouth guideline */}
+                        <ellipse
+                          cx="140"
+                          cy="200"
+                          rx="20"
+                          ry="8"
+                          fill="none"
+                          stroke="url(#faceGradient)"
+                          strokeWidth="2"
+                          strokeOpacity="0.5"
+                        />
+                        
+                        {/* Corner accent marks */}
+                        <circle cx="50" cy="80" r="3" fill="url(#pulseGradient)" opacity="0.8" />
+                        <circle cx="230" cy="80" r="3" fill="url(#pulseGradient)" opacity="0.8" />
+                        <circle cx="50" cy="240" r="3" fill="url(#pulseGradient)" opacity="0.8" />
+                        <circle cx="230" cy="240" r="3" fill="url(#pulseGradient)" opacity="0.8" />
+                      </svg>
+                      
+                      {/* Center positioning guide */}
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          width: '4px',
+                          height: '4px',
+                          borderRadius: '50%',
+                          background: 'rgba(16, 185, 129, 0.8)',
+                          boxShadow: '0 0 10px rgba(16, 185, 129, 0.6)',
+                        }}
+                      />
+                    </Box>
                   </>
                 ) : (
                   <Stack 
@@ -291,7 +410,7 @@ export const FaceScan: React.FC<FaceScanProps> = ({
                         Real Camera Preview
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Click "Start Biometric Scan" to begin face authentication
+                        Click "Start Biometric Scan" to begin enhanced face authentication with liveness detection
                       </Typography>
                     </Stack>
                   </Stack>
@@ -342,6 +461,73 @@ export const FaceScan: React.FC<FaceScanProps> = ({
                           },
                         }}
                       />
+                      
+                      {/* Individual Action Progress Indicators */}
+                      <Stack direction="row" spacing={2} sx={{ mt: 2 }} justifyContent="center">
+                        <Chip
+                          icon={livenessActions.blink ? <CheckCircleIcon /> : <VisibilityIcon />}
+                          label="Blink"
+                          size="small"
+                          sx={{
+                            background: livenessActions.blink 
+                              ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                              : 'rgba(156, 163, 175, 0.1)',
+                            border: livenessActions.blink 
+                              ? '1px solid #10b981'
+                              : '1px solid rgba(156, 163, 175, 0.3)',
+                            color: livenessActions.blink ? 'white' : 'rgba(156, 163, 175, 0.8)',
+                            fontWeight: 600,
+                            transition: 'all 0.3s ease',
+                            '&.MuiChip-root': {
+                              ...(livenessActions.blink ? {} : {
+                                animation: `${pulse} 2s infinite`,
+                              }),
+                            },
+                          }}
+                        />
+                        <Chip
+                          icon={livenessActions.leftRotation ? <CheckCircleIcon /> : <span>↶</span>}
+                          label="Turn Left"
+                          size="small"
+                          sx={{
+                            background: livenessActions.leftRotation 
+                              ? 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)'
+                              : 'rgba(156, 163, 175, 0.1)',
+                            border: livenessActions.leftRotation 
+                              ? '1px solid #3b82f6'
+                              : '1px solid rgba(156, 163, 175, 0.3)',
+                            color: livenessActions.leftRotation ? 'white' : 'rgba(156, 163, 175, 0.8)',
+                            fontWeight: 600,
+                            transition: 'all 0.3s ease',
+                            '&.MuiChip-root': {
+                              ...(!livenessActions.leftRotation && livenessActions.blink ? {
+                                animation: `${pulse} 2s infinite`,
+                              } : {}),
+                            },
+                          }}
+                        />
+                        <Chip
+                          icon={livenessActions.rightRotation ? <CheckCircleIcon /> : <span>↷</span>}
+                          label="Turn Right"
+                          size="small"
+                          sx={{
+                            background: livenessActions.rightRotation 
+                              ? 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)'
+                              : 'rgba(156, 163, 175, 0.1)',
+                            border: livenessActions.rightRotation 
+                              ? '1px solid #ec4899'
+                              : '1px solid rgba(156, 163, 175, 0.3)',
+                            color: livenessActions.rightRotation ? 'white' : 'rgba(156, 163, 175, 0.8)',
+                            fontWeight: 600,
+                            transition: 'all 0.3s ease',
+                            '&.MuiChip-root': {
+                              ...(!livenessActions.rightRotation && livenessActions.blink && livenessActions.leftRotation ? {
+                                animation: `${pulse} 2s infinite`,
+                              } : {}),
+                            },
+                          }}
+                        />
+                      </Stack>
                     </Paper>
                   </Stack>
                 
@@ -395,6 +581,56 @@ export const FaceScan: React.FC<FaceScanProps> = ({
                     )}
                   </Alert>
                 
+              )}
+
+              {/* Helpful Tips */}
+              {!isScanning && (
+                <Paper
+                  elevation={0}
+                  sx={{
+                    p: 3,
+                    background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(147, 51, 234, 0.05) 100%)',
+                    border: '1px solid rgba(59, 130, 246, 0.1)',
+                    borderRadius: 2,
+                  }}
+                >
+                  <Typography variant="h6" gutterBottom sx={{ 
+                    color: '#3b82f6',
+                    fontWeight: 600,
+                    mb: 2 
+                  }}>
+                    💡 Enhanced Liveness Detection
+                  </Typography>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={4}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <VisibilityIcon sx={{ color: '#10b981', fontSize: 18 }} />
+                        <Typography variant="body2" color="text.secondary">
+                          <strong>Blink:</strong> Natural eye blink to prove you're real
+                        </Typography>
+                      </Stack>
+                    </Grid>
+                    <Grid item xs={12} sm={4}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <span style={{ color: '#3b82f6', fontSize: '18px' }}>↶</span>
+                        <Typography variant="body2" color="text.secondary">
+                          <strong>Turn Left:</strong> Slowly turn your head to the left
+                        </Typography>
+                      </Stack>
+                    </Grid>
+                    <Grid item xs={12} sm={4}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <span style={{ color: '#ec4899', fontSize: '18px' }}>↷</span>
+                        <Typography variant="body2" color="text.secondary">
+                          <strong>Turn Right:</strong> Slowly turn your head to the right
+                        </Typography>
+                      </Stack>
+                    </Grid>
+                  </Grid>
+                  <Typography variant="caption" display="block" sx={{ mt: 2, fontStyle: 'italic', color: 'text.secondary' }}>
+                    Follow the face-shaped guide on screen and complete all three actions for verification
+                  </Typography>
+                </Paper>
               )}
 
               {/* Beautiful Action Buttons */}
