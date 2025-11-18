@@ -1,4 +1,4 @@
-import contractModule from '../../contract/src/managed/bboard/contract/index.cjs';
+import contractModule from '../../contract/src/managed/humanzee/contract/index.cjs';
 const { Contract, ledger, pureCircuits } = contractModule;
 
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';

@@ -7,8 +7,8 @@
   "type": "module",
   "workspaces": {
     "packages": [
-      "bboard-cli",
-      "bboard-ui",
+      "cli",
+      "frontend",
       "api",
       "contract"
     ]

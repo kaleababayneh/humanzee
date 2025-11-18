@@ -1,12 +1,12 @@
 {
-  "name": "@midnight-ntwrk/bboard-ui",
+  "name": "frontend",
   "version": "0.1.0",
   "author": "IOG",
   "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rm -rf ./dist && tsc && vite build --mode testnet && cp -r ../contract/src/managed/bboard/keys ./dist/keys && cp -r ../contract/src/managed/bboard/zkir ./dist/zkir",
+    "build": "rm -rf ./dist && tsc && vite build --mode testnet && cp -r ../contract/src/managed/humanzee/keys ./dist/keys && cp -r ../contract/src/managed/humanzee/zkir ./dist/zkir",
     "build:start": "npm run build && npm run start",
     "ci": "npm run typecheck && npm run lint",
     "dev": "vite",

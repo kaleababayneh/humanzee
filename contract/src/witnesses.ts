@@ -1,4 +1,4 @@
-import { Ledger } from "./managed/bboard/contract/index.cjs";
+import { Ledger } from "./managed/humanzee/contract/index.cjs";
 import { WitnessContext } from "@midnight-ntwrk/compact-runtime";
 
 export type BBoardPrivateState = {

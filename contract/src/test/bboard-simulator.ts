@@ -13,7 +13,7 @@ import {
   type Vote,
   type Comment,
   type AuthorityCredential,
-} from "../managed/bboard/contract/index.cjs";
+} from "../managed/humanzee/contract/index.cjs";
 import { type BBoardPrivateState, witnesses } from "../witnesses.js";
 
 /**
