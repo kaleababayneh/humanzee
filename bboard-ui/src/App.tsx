@@ -167,7 +167,7 @@ const App: React.FC = () => {
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.icon}>🗳️</div>
-        <h1 style={styles.title}>Midnight DAO Voting dApp</h1>
+        <h1 style={styles.title}>Midnight DAO Voting</h1>
         <p style={styles.subtitle}>
           Decentralized governance with privacy and face recognition
         </p>

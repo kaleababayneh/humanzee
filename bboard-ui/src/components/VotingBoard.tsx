@@ -400,7 +400,7 @@ export const VotingBoard: React.FC<VotingBoardProps> = ({
     return (
       <div style={styles.container}>
         <div style={styles.header}>
-          <h1 style={styles.title}>Midnight DAO Voting dApp</h1>
+          <h1 style={styles.title}>Midnight DAO Voting</h1>
           <p style={styles.subtitle}>Decentralized governance with privacy</p>
         </div>
 
