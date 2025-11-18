@@ -167,7 +167,7 @@ const App: React.FC = () => {
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.icon}>🗳️</div>
-        <h1 style={styles.title}>Midnight Voting dApp</h1>
+        <h1 style={styles.title}>Midnight DAO Voting dApp</h1>
         <p style={styles.subtitle}>
           Decentralized governance with privacy and face recognition
         </p>
@@ -178,12 +178,6 @@ const App: React.FC = () => {
         <div style={{...styles.status, ...styles.statusInfo}}>
           <div style={styles.spinner}></div>
           {' '}🧠 Initializing biometric authentication system...
-        </div>
-      )}
-      
-      {faceModelsLoaded && !isInitializing && (
-        <div style={{...styles.status, ...styles.statusSuccess}}>
-          ✅ Biometric system ready • Face recognition enabled
         </div>
       )}
 
