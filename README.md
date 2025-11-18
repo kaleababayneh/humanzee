@@ -1,4 +1,4 @@
-# 🗳️ Biometric Voting System on Midnight Network
+# 🗳️ Biometric DAO Voting System on Midnight Network
 
 A secure, privacy-preserving voting application that uses **face recognition biometrics** for voter authentication on the **Midnight blockchain**. No manual identity input required - your face is your voting credential.
 
