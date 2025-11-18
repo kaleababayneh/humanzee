@@ -3,6 +3,7 @@ import { type DeployedBBoardAPI, type BBoardDerivedState } from '../../../api/sr
 import { type Proposal, type Vote, type Comment } from '../../../contract/src/index';
 import { type BoardDeployment } from '../contexts';
 import { FaceScan } from './SimpleFaceScan';
+import { getFaceHashHex } from '../utils/faceRecognition';
 
 // Simple CSS styles
 const styles = {
@@ -194,12 +195,14 @@ export const VotingBoard: React.FC<VotingBoardProps> = ({
   currentBoard
 }) => {
   const [boardState, setBoardState] = useState<BBoardDerivedState | null>(null);
-  const [userIdentity, setUserIdentity] = useState('');
+  const [faceIdentity, setFaceIdentity] = useState(''); // Face hash as identity
+  const [displayName, setDisplayName] = useState(''); // Short display name
+  const [isAuthenticated, setIsAuthenticated] = useState(false); // Face authentication status
+  const [showFaceScan, setShowFaceScan] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [joinAddress, setJoinAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [showFaceScan, setShowFaceScan] = useState(false);
   const [pendingAction, setPendingAction] = useState<'voteFor' | 'voteAgainst' | 'comment' | null>(null);
 
   // Subscribe to board state changes
@@ -222,54 +225,82 @@ export const VotingBoard: React.FC<VotingBoardProps> = ({
     setTimeout(() => setMessage(null), 5000);
   }, []);
 
-  const handleVoteFor = useCallback(async () => {
-    if (!userIdentity.trim()) {
-      showMessage('error', 'Please enter a user identity');
-      return;
+  // Face authentication handlers
+  const handleFaceRecognized = useCallback(async (faceHash: string) => {
+    setShowFaceScan(false);
+    
+    try {
+      setLoading(true);
+      
+      // Set face identity and display name
+      setFaceIdentity(faceHash);
+      const shortDisplayName = `User_${faceHash.substring(0, 8)}`;
+      setDisplayName(shortDisplayName);
+      setIsAuthenticated(true);
+      
+      // Execute pending action
+      if (pendingAction === 'voteFor') {
+        await executeVoteFor(faceHash);
+      } else if (pendingAction === 'voteAgainst') {
+        await executeVoteAgainst(faceHash);
+      } else if (pendingAction === 'comment') {
+        await executeComment(faceHash, commentText);
+      }
+      
+      setPendingAction(null);
+      console.log('🎭 Face-based voting identity:', {
+        faceHash: faceHash.substring(0, 16) + '...', 
+        displayName: shortDisplayName,
+        action: pendingAction
+      });
+      
+    } catch (error) {
+      console.error('Failed to execute voting action:', error);
+      showMessage('error', 'Failed to execute voting action');
+    } finally {
+      setLoading(false);
     }
+  }, [pendingAction, commentText]);
 
-    if (faceRecognitionAvailable) {
+  const handleFaceScanCancel = useCallback(() => {
+    setShowFaceScan(false);
+    setPendingAction(null);
+  }, []);
+
+  const handleVoteFor = useCallback(async () => {
+    if (!isAuthenticated) {
       setPendingAction('voteFor');
       setShowFaceScan(true);
       return;
     }
 
-    await executeVoteFor(userIdentity);
-  }, [userIdentity, faceRecognitionAvailable]);
+    await executeVoteFor(faceIdentity);
+  }, [faceIdentity, isAuthenticated]);
 
   const handleVoteAgainst = useCallback(async () => {
-    if (!userIdentity.trim()) {
-      showMessage('error', 'Please enter a user identity');
-      return;
-    }
-
-    if (faceRecognitionAvailable) {
+    if (!isAuthenticated) {
       setPendingAction('voteAgainst');
       setShowFaceScan(true);
       return;
     }
 
-    await executeVoteAgainst(userIdentity);
-  }, [userIdentity, faceRecognitionAvailable]);
+    await executeVoteAgainst(faceIdentity);
+  }, [faceIdentity, isAuthenticated]);
 
   const handleComment = useCallback(async () => {
-    if (!userIdentity.trim()) {
-      showMessage('error', 'Please enter a user identity');
-      return;
-    }
     if (!commentText.trim()) {
       showMessage('error', 'Please enter a comment');
       return;
     }
 
-    if (faceRecognitionAvailable) {
+    if (!isAuthenticated) {
       setPendingAction('comment');
       setShowFaceScan(true);
       return;
     }
 
-    await executeComment(userIdentity, commentText);
-  }, [userIdentity, commentText, faceRecognitionAvailable]);
+    await executeComment(faceIdentity, commentText);
+  }, [faceIdentity, commentText, isAuthenticated]);
 
   const executeVoteFor = async (identity: string) => {
     setLoading(true);
@@ -477,28 +508,41 @@ export const VotingBoard: React.FC<VotingBoardProps> = ({
       {isVotingOpen && (
         <div style={styles.card}>
           <h3>Cast Your Vote</h3>
-          <input
-            type="text"
-            placeholder="Enter your identity (e.g., user@example.com)"
-            value={userIdentity}
-            onChange={(e) => setUserIdentity(e.target.value)}
-            style={styles.input}
-          />
+          
+          {isAuthenticated ? (
+            <div style={{...styles.card, backgroundColor: '#f0f8ff', border: '2px solid #10b981'}}>
+              <p style={{color: '#059669', fontWeight: 'bold', marginBottom: '10px'}}>
+                ✅ Authenticated: {displayName}
+              </p>
+              <p style={{color: '#6b7280', fontSize: '14px', marginBottom: '15px'}}>
+                Face Hash: {faceIdentity.substring(0, 16)}...
+              </p>
+            </div>
+          ) : (
+            <div style={{...styles.card, backgroundColor: '#fef3c7', border: '2px solid #f59e0b'}}>
+              <p style={{color: '#d97706', fontWeight: 'bold', marginBottom: '10px'}}>
+                🔐 Biometric authentication required to vote
+              </p>
+              <p style={{color: '#6b7280', fontSize: '14px'}}>
+                Click vote buttons to start face scan authentication
+              </p>
+            </div>
+          )}
           
           <div style={styles.buttonRow}>
             <button 
               style={{...styles.button, ...styles.buttonSuccess}}
               onClick={handleVoteFor}
-              disabled={loading || !userIdentity.trim()}
+              disabled={loading}
             >
-              Vote FOR
+              {loading && pendingAction === 'voteFor' ? 'Processing...' : 'Vote FOR'}
             </button>
             <button 
               style={{...styles.button, ...styles.buttonDanger}}
               onClick={handleVoteAgainst}
-              disabled={loading || !userIdentity.trim()}
+              disabled={loading}
             >
-              Vote AGAINST
+              {loading && pendingAction === 'voteAgainst' ? 'Processing...' : 'Vote AGAINST'}
             </button>
           </div>
         </div>
@@ -510,13 +554,26 @@ export const VotingBoard: React.FC<VotingBoardProps> = ({
         
         {proposal.executed !== 1 && ( // Not rejected
           <>
-            <input
-              type="text"
-              placeholder="Enter your identity"
-              value={userIdentity}
-              onChange={(e) => setUserIdentity(e.target.value)}
-              style={styles.input}
-            />
+            {isAuthenticated ? (
+              <div style={{...styles.card, backgroundColor: '#f0f8ff', border: '2px solid #10b981', marginBottom: '15px'}}>
+                <p style={{color: '#059669', fontWeight: 'bold', marginBottom: '5px'}}>
+                  ✅ Commenting as: {displayName}
+                </p>
+                <p style={{color: '#6b7280', fontSize: '12px'}}>
+                  Face Hash: {faceIdentity.substring(0, 16)}...
+                </p>
+              </div>
+            ) : (
+              <div style={{...styles.card, backgroundColor: '#fef3c7', border: '2px solid #f59e0b', marginBottom: '15px'}}>
+                <p style={{color: '#d97706', fontWeight: 'bold', marginBottom: '5px'}}>
+                  🔐 Biometric authentication required to comment
+                </p>
+                <p style={{color: '#6b7280', fontSize: '12px'}}>
+                  Click 'Add Comment' to start face scan authentication
+                </p>
+              </div>
+            )}
+            
             <textarea
               placeholder="Add a comment..."
               value={commentText}
@@ -526,9 +583,9 @@ export const VotingBoard: React.FC<VotingBoardProps> = ({
             <button 
               style={{...styles.button, ...styles.buttonPrimary}}
               onClick={handleComment}
-              disabled={loading || !userIdentity.trim() || !commentText.trim()}
+              disabled={loading || !commentText.trim()}
             >
-              Add Comment
+              {loading && pendingAction === 'comment' ? 'Processing...' : 'Add Comment'}
             </button>
           </>
         )}
@@ -590,6 +647,14 @@ export const VotingBoard: React.FC<VotingBoardProps> = ({
         <div style={styles.loading}>
           Processing transaction...
         </div>
+      )}
+
+      {/* Face Scan Authentication */}
+      {showFaceScan && (
+        <FaceScan
+          onFaceRecognized={handleFaceRecognized}
+          onCancel={handleFaceScanCancel}
+        />
       )}
     </div>
   );

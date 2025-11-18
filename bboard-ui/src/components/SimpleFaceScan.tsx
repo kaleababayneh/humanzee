@@ -720,3 +720,5 @@ export const FaceScan: React.FC<FaceScanProps> = ({
     </div>
   );
 };
+
+export default FaceScan;
