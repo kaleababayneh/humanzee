@@ -27,7 +27,7 @@ import { findBestMatch } from '../utils/faceRecognition';
 import { LivenessDetector, detectEyeState, detectHeadPose, validateFaceQuality } from '../utils/livenessDetection';
 
 interface FaceScanProps {
-  onScanComplete: (faceDescriptor: Float32Array, liveliness: number) => void;
+  onScanComplete: (faceDescriptor: Float32Array, liveliness: number, landmarks?: any) => void;
   onCancel: () => void;
 }
 
@@ -57,6 +57,7 @@ export const FaceScan: React.FC<FaceScanProps> = ({
   const isScanningRef = useRef(false);
   const livenessDetectorRef = useRef(new LivenessDetector());
   const livenessVerifiedRef = useRef(false);
+  const landmarksRef = useRef<any>(null); // Store landmarks for robust hash generation
 
   // Add beautiful animations
   const pulse = keyframes`
@@ -104,6 +105,9 @@ export const FaceScan: React.FC<FaceScanProps> = ({
 
     // Check for liveness first
     if (landmarks && !livenessVerifiedRef.current) {
+      // Store landmarks for hash generation
+      landmarksRef.current = landmarks;
+      
       const eyeState = detectEyeState(landmarks);
       
       // If eye state detection failed, show guidance message
@@ -148,7 +152,7 @@ export const FaceScan: React.FC<FaceScanProps> = ({
           setIsScanning(false);
           isScanningRef.current = false;
           setShowCompletionAnimation(false);
-          onScanComplete(descriptor, liveliness);
+          onScanComplete(descriptor, liveliness, landmarksRef.current);
         }, 3000); // Show animation for 3 seconds
         
       } else {
@@ -265,13 +269,13 @@ export const FaceScan: React.FC<FaceScanProps> = ({
                   alignItems: 'center',
                 }}
               >
-                {/* Circular face container */}
+                {/* Rectangle face container */}
                 <Box
                   sx={{
                     position: 'relative',
-                    width: 350,
-                    height: 350,
-                    borderRadius: '50%', // Perfect circle
+                    width: 400,
+                    height: 500,
+                    borderRadius: 4, // Rounded rectangle
                     overflow: 'hidden',
                     background: isScanning 
                       ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(102, 126, 234, 0.1) 100%)'
@@ -291,7 +295,7 @@ export const FaceScan: React.FC<FaceScanProps> = ({
                       left: -4,
                       right: -4,
                       bottom: -4,
-                      borderRadius: '50%', // Perfect circle
+                      borderRadius: 4, // Rounded rectangle
                       background: isScanning 
                         ? 'linear-gradient(45deg, #10b981, #667eea, #10b981)'
                         : 'transparent',

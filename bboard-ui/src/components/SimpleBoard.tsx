@@ -113,15 +113,16 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
 
   const handleFaceScanComplete = useCallback(async (
     faceData: Float32Array, 
-    detectedLiveliness: number
+    detectedLiveliness: number,
+    landmarks?: any
   ) => {
     setShowFaceScan(false);
     
     try {
       setIsLoading(true);
       
-      // Generate face hash as identity
-      const faceHash = await getFaceHashHex(faceData);
+      // Generate face hash as identity with landmarks for robustness
+      const faceHash = await getFaceHashHex(faceData, landmarks);
       setFaceIdentity(faceHash);
       setFaceDescriptor(faceData);
       setLiveliness(detectedLiveliness);
@@ -132,7 +133,7 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
       const shortDisplayName = `User_${faceHash.substring(0, 8)}`;
       setDisplayName(shortDisplayName);
       
-      console.log('🎭 Face-based identity generated:', {
+      console.log('🎭 Face-based identity generated (expression-invariant):', {
         faceHash: faceHash.substring(0, 16) + '...', 
         liveliness: detectedLiveliness,
         displayName: shortDisplayName,
