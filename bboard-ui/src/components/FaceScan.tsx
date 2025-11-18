@@ -21,25 +21,18 @@ import { findBestMatch } from '../utils/faceRecognition';
 import { LivenessDetector, detectEyeState } from '../utils/livenessDetection';
 
 interface FaceScanProps {
-  userName: string;
-  onScanComplete: (result: {
-    success: boolean;
-    liveliness: number;
-    faceId: string;
-    error?: string;
-  }) => void;
+  onScanComplete: (faceDescriptor: Float32Array, liveliness: number) => void;
   onCancel: () => void;
 }
 
 interface BiometricResult {
   liveliness: number;
-  faceId: string;
+  faceDescriptor: Float32Array;
   confidence: number;
-  matchFound: boolean;
+  isLive: boolean;
 }
 
 export const FaceScan: React.FC<FaceScanProps> = ({
-  userName,
   onScanComplete,
   onCancel
 }) => {
@@ -68,34 +61,27 @@ export const FaceScan: React.FC<FaceScanProps> = ({
       
       if (hasLiveness) {
         livenessVerifiedRef.current = true;
-        setCurrentStep('✓ Liveness verified! Analyzing facial features...');
-        setMessage('✓ Real person detected! Processing biometric data...');
+        setCurrentStep('✓ Liveness verified! Processing face descriptor...');
+        setMessage('✓ Real person detected! Generating biometric identity...');
         
         // Calculate liveliness score (70-100 based on blink quality)
         const liveliness = Math.min(100, 70 + (blinkCount * 15) + Math.floor(Math.random() * 15));
         
-        // Generate face ID
-        const faceId = `face_${userName}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-        
-        // Set successful result
+        // Set successful result with face descriptor
         const biometricResult: BiometricResult = {
           liveliness,
-          faceId,
+          faceDescriptor: descriptor,
           confidence: 95,
-          matchFound: true
+          isLive: true
         };
         
         setResult(biometricResult);
         
-        // Complete the scan
+        // Complete the scan and return the face descriptor
         setTimeout(() => {
           setIsScanning(false);
           isScanningRef.current = false;
-          onScanComplete({
-            success: true,
-            liveliness,
-            faceId
-          });
+          onScanComplete(descriptor, liveliness);
         }, 1500);
         
       } else {
@@ -104,32 +90,7 @@ export const FaceScan: React.FC<FaceScanProps> = ({
         return;
       }
     }
-
-    if (!livenessVerifiedRef.current) return;
-
-    try {
-      const users = await getAllUsers();
-      console.log('Users in DB for verification:', users.length);
-      
-      if (users.length > 0) {
-        const match = findBestMatch(descriptor, users, 0.6);
-        console.log('Face match result:', match);
-
-        if (match) {
-          matchCountRef.current[match.id] = (matchCountRef.current[match.id] || 0) + 1;
-          console.log('Match count:', matchCountRef.current[match.id]);
-
-          if (matchCountRef.current[match.id] >= 2) {
-            setMessage(`✓ Face recognized: ${match.username}`);
-          } else {
-            setMessage(`Verifying identity... (${matchCountRef.current[match.id]}/2)`);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Face verification error:', error);
-    }
-  }, [userName, onScanComplete]);
+  }, [onScanComplete]);
 
   const startFaceScan = useCallback(async () => {
     console.log('Starting real face scan...');
@@ -186,12 +147,6 @@ export const FaceScan: React.FC<FaceScanProps> = ({
             <Typography variant="body2" color="text.secondary">
               Advanced biometric verification with liveness detection
             </Typography>
-            <Chip 
-              icon={<FaceIcon />} 
-              label={`User: ${userName}`} 
-              variant="outlined" 
-              sx={{ mt: 1 }}
-            />
           </Box>
 
           {/* Real Camera Feed */}
@@ -262,9 +217,9 @@ export const FaceScan: React.FC<FaceScanProps> = ({
                   color={result.confidence >= 85 ? 'success' : 'warning'}
                 />
               </Stack>
-              {result.matchFound && (
+              {result.isLive && (
                 <Typography variant="caption" display="block" sx={{ mt: 1 }}>
-                  ✓ Face recognition successful
+                  ✓ Biometric identity captured successfully
                 </Typography>
               )}
             </Alert>

@@ -80,3 +80,21 @@ export const findBestMatch = (
 
   return bestMatch;
 };
+
+// Generate a unique hash from face descriptor for identity
+export const generateFaceHash = async (faceDescriptor: Float32Array): Promise<Uint8Array> => {
+  // Convert Float32Array to ArrayBuffer
+  const buffer = new ArrayBuffer(faceDescriptor.length * 4);
+  const view = new Float32Array(buffer);
+  view.set(faceDescriptor);
+  
+  // Generate SHA-256 hash
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  return new Uint8Array(hashBuffer);
+};
+
+// Get face hash as hex string for use as user identity
+export const getFaceHashHex = async (faceDescriptor: Float32Array): Promise<string> => {
+  const hash = await generateFaceHash(faceDescriptor);
+  return Array.from(hash).map(b => b.toString(16).padStart(2, '0')).join('');
+};

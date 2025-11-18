@@ -23,6 +23,7 @@ import SecurityIcon from '@mui/icons-material/Security';
 import { type DeployedBBoardAPI, type BBoardDerivedState } from '../../../api/src/index';
 import { type Post } from '../../../contract/src/index';
 import { FaceScan } from './FaceScan';
+import { getFaceHashHex } from '../utils/faceRecognition';
 
 interface SimpleBoardProps {
   deployedBoardAPI?: DeployedBBoardAPI;
@@ -39,11 +40,13 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
   isConnecting = false,
   faceRecognitionAvailable = false
 }) => {
-  const [userName, setUserName] = useState('');
+  // Remove userName state - no longer needed
+  const [faceIdentity, setFaceIdentity] = useState<string>(''); // Face hash as identity
+  const [displayName, setDisplayName] = useState<string>(''); // Short display name
   const [liveliness, setLiveliness] = useState<number>(100); // Will be set by face scan
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isBiometricVerified, setIsBiometricVerified] = useState(false);
-  const [faceId, setFaceId] = useState<string>('');
+  const [faceDescriptor, setFaceDescriptor] = useState<Float32Array | null>(null);
   const [showFaceScan, setShowFaceScan] = useState(false);
   const [message, setMessage] = useState('');
   const [boardState, setBoardState] = useState<BBoardDerivedState | null>(null);
@@ -69,36 +72,51 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
   }, [deployedBoardAPI]);
 
   const handleSignIn = useCallback(() => {
-    if (!userName.trim() || !deployedBoardAPI) return;
+    if (!deployedBoardAPI) return;
 
     // Start biometric authentication flow
     setShowFaceScan(true);
     setError('');
-  }, [userName, deployedBoardAPI]);
+  }, [deployedBoardAPI]);
 
-  const handleFaceScanComplete = useCallback((result: {
-    success: boolean;
-    liveliness: number;
-    faceId: string;
-    error?: string;
-  }) => {
+  const handleFaceScanComplete = useCallback(async (
+    faceData: Float32Array, 
+    detectedLiveliness: number
+  ) => {
     setShowFaceScan(false);
     
-    if (result.success) {
+    try {
+      setIsLoading(true);
+      
+      // Generate face hash as identity
+      const faceHash = await getFaceHashHex(faceData);
+      setFaceIdentity(faceHash);
+      setFaceDescriptor(faceData);
+      setLiveliness(detectedLiveliness);
       setIsBiometricVerified(true);
       setIsSignedIn(true);
-      setLiveliness(result.liveliness);
-      setFaceId(result.faceId);
-      setError('');
       
-      // Prefill message editor with a signed hint
-      setMessage((prev) => prev && prev.trim() !== '' ? prev : `Verified by ${userName} (Liveliness: ${result.liveliness}%)`);
-    } else {
-      setError(result.error || 'Biometric verification failed');
+      // Generate a display name from face hash
+      const shortDisplayName = `User_${faceHash.substring(0, 8)}`;
+      setDisplayName(shortDisplayName);
+      
+      console.log('🎭 Face-based identity generated:', {
+        faceHash: faceHash.substring(0, 16) + '...', 
+        liveliness: detectedLiveliness,
+        displayName: shortDisplayName,
+        descriptorLength: faceData.length
+      });
+      
+      setError('');
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Failed to process face scan:', error);
+      setError('Failed to generate biometric identity');
       setIsBiometricVerified(false);
       setIsSignedIn(false);
+      setIsLoading(false);
     }
-  }, [userName]);
+  }, []);
 
   const handleFaceScanCancel = useCallback(() => {
     setShowFaceScan(false);
@@ -108,15 +126,16 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
   const handleSignOut = useCallback(() => {
     setIsSignedIn(false);
     setIsBiometricVerified(false);
-    setUserName('');
+    setFaceIdentity('');
+    setDisplayName('');
+    setFaceDescriptor(null);
     setMessage('');
     setLiveliness(100); // Reset to default
-    setFaceId('');
     setError('');
   }, []);
 
   const handlePostMessage = useCallback(async () => {
-    if (!deployedBoardAPI || !message.trim() || !userName.trim() || !isBiometricVerified) return;
+    if (!deployedBoardAPI || !message.trim() || !faceIdentity || !isBiometricVerified) return;
 
     setIsLoading(true);
     setError('');
@@ -124,13 +143,14 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
     try {
       console.log('📤 Posting message using authorizeAndPost', { 
         message, 
-        author: userName, 
+        faceHash: faceIdentity.substring(0, 16) + '...', 
+        displayName,
         liveliness,
-        faceId: faceId.slice(0, 16) + '...'
+        descriptorLength: faceDescriptor?.length
       });
 
-      // Use the same method that works in CLI - authorizeAndPost now accepts liveliness parameter
-      await deployedBoardAPI.authorizeAndPost(userName, message, userName, BigInt(liveliness));
+      // Use face hash as user identity for the API call
+      await deployedBoardAPI.authorizeAndPost(faceIdentity, message, displayName, BigInt(liveliness));
 
       // Clear message after successful post
       setMessage('');
@@ -139,7 +159,7 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [deployedBoardAPI, userName, message, liveliness, isBiometricVerified, faceId]);
+  }, [deployedBoardAPI, faceIdentity, displayName, message, liveliness, isBiometricVerified, faceDescriptor]);
 
   const handleCreateBoard = useCallback(() => {
     setError('');
@@ -233,7 +253,7 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
                 />
                 <Chip
                   icon={<PersonIcon />}
-                  label={userName}
+                  label={displayName}
                   onDelete={handleSignOut}
                   color="primary"
                   variant="outlined"
@@ -247,40 +267,50 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
       {/* Face Scan Authentication */}
       {showFaceScan && (
         <FaceScan
-          userName={userName}
           onScanComplete={handleFaceScanComplete}
           onCancel={handleFaceScanCancel}
         />
       )}
 
-      {/* Sign in section */}
+      {/* Biometric Authentication section */}
       {!isSignedIn && !showFaceScan && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
-            <Stack spacing={2}>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <TextField
-                  label="Your Name"
-                  value={userName}
-                  onChange={(e) => setUserName(e.target.value)}
-                  size="small"
-                  placeholder="Enter your name..."
-                  sx={{ flexGrow: 1 }}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSignIn()}
-                />
-                <Button
-                  variant="contained"
-                  onClick={handleSignIn}
-                  disabled={!userName.trim() || !faceRecognitionAvailable}
-                  startIcon={<SecurityIcon />}
-                >
-                  Real Face Scan
-                </Button>
-              </Stack>
-              <Typography variant="caption" color="text.secondary">
-                Enter your name, then proceed to biometric face scan for authentication.
-                Real camera with liveness detection will be used.
-              </Typography>
+            <Typography variant="h6" gutterBottom>
+              🔐 Biometric Authentication
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Scan your face to generate a unique biometric identity for posting messages.
+              Your face will be converted to a cryptographic hash for secure identification.
+            </Typography>
+            
+            <Button
+              variant="contained"
+              onClick={handleSignIn}
+              disabled={!faceRecognitionAvailable}
+              startIcon={<SecurityIcon />}
+              fullWidth
+              size="large"
+            >
+              Start Face Scan Authentication
+            </Button>
+            
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+              ✅ Real camera with liveness detection<br/>
+              ✅ Face descriptor converted to unique identity hash<br/>
+              ✅ No personal data stored - only mathematical hash
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Loading state during face scan processing */}
+      {isLoading && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <CircularProgress size={20} />
+              <Typography>Processing biometric identity...</Typography>
             </Stack>
           </CardContent>
         </Card>
@@ -291,7 +321,7 @@ export const SimpleBoard: React.FC<SimpleBoardProps> = ({
         <Card sx={{ mb: 3 }}>
           <CardHeader 
             title="📝 Compose Message"
-            subheader={`Authenticated: ${userName} | Face ID: ${faceId.slice(0, 16)}... | Liveliness: ${liveliness}%`}
+            subheader={`Identity: ${displayName} | Hash: ${faceIdentity.substring(0, 16)}... | Liveliness: ${liveliness}%`}
           />
           <CardContent>
             <Stack spacing={2}>
