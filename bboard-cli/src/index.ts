@@ -14,7 +14,7 @@
 // limitations under the License.
 
 /*
- * This file is the main driver for the Midnight bulletin board example.
+ * This file is the main driver for the Midnight voting contract example.
  * The entry point is the run function, at the end of the file.
  * We expect the startup files (testnet-remote.ts, standalone.ts, etc.) to
  * call run with some specific configuration that sets the network addresses
@@ -90,8 +90,8 @@ export const getBBoardLedgerState = async (
 
 const DEPLOY_OR_JOIN_QUESTION = `
 You can do one of the following:
-  1. Deploy a new bulletin board contract
-  2. Join an existing bulletin board contract
+  1. Deploy a new voting contract
+  2. Join an existing voting contract
   3. Exit
 Which would you like to do? `;
 
@@ -102,12 +102,19 @@ const deployOrJoin = async (providers: BBoardProviders, rli: Interface, logger: 
     const choice = await rli.question(DEPLOY_OR_JOIN_QUESTION);
     switch (choice) {
       case '1':
-        api = await BBoardAPI.deploy(providers, logger);
-        logger.info(`Deployed contract at address: ${api.deployedContractAddress}`);
+        // Prompt for deployment parameters
+        const description = await rli.question('Enter proposal description (default: "Default governance proposal"): ') || "Default governance proposal";
+        const hoursFromNow = await rli.question('Enter voting deadline hours from now (default: 1): ') || "1";
+        const deadlineInSeconds = BigInt(Math.floor(Date.now() / 1000) + parseInt(hoursFromNow) * 3600);
+        
+        api = await BBoardAPI.deploy(providers, BigInt(50), description, deadlineInSeconds, logger);
+        logger.info(`Deployed voting contract at address: ${api.deployedContractAddress}`);
+        logger.info(`Proposal: "${description}"`);
+        logger.info(`Voting deadline: ${new Date(Number(deadlineInSeconds) * 1000).toISOString()}`);
         return api;
       case '2':
         api = await BBoardAPI.join(providers, await rli.question('What is the contract address (in hex)? '), logger);
-        logger.info(`Joined contract at address: ${api.deployedContractAddress}`);
+        logger.info(`Joined voting contract at address: ${api.deployedContractAddress}`);
         return api;
       case '3':
         logger.info('Exiting...');
@@ -131,29 +138,52 @@ const displayLedgerState = async (
   const contractAddress = deployedBBoardContract.deployTxData.public.contractAddress;
   const ledgerState = await getBBoardLedgerState(providers, contractAddress);
   if (ledgerState === null) {
-    logger.info(`There is no bulletin board contract deployed at ${contractAddress}`);
+    logger.info(`There is no voting contract deployed at ${contractAddress}`);
   } else {
     logger.info(`Current sequence is: ${ledgerState.sequence}`);
     logger.info(`Authority public key: x=${ledgerState.authority_pk.x}, y=${ledgerState.authority_pk.y}`);
     
-    // Display posts
-    const posts = Array.from(ledgerState.posts);
-    logger.info(`Total posts: ${posts.length}`);
+    // Display proposal
+    const proposal = ledgerState.proposal;
+    logger.info(`Proposal: "${proposal.description}" (ID: ${proposal.id})`);
+    logger.info(`Proposer: ${toHex(proposal.proposer).slice(0, 16)}...`);
+    logger.info(`Deadline: ${new Date(Number(proposal.deadline_timestamp) * 1000).toISOString()}`);
+    logger.info(`Status: ${proposal.executed === 0 ? 'ACTIVE' : proposal.executed === 1 ? 'REJECTED' : 'PASSED'}`);
+    logger.info(`Votes - For: ${proposal.votes_for}, Against: ${proposal.votes_against}`);
     
-    if (posts.length > 0) {
-      logger.info('Recent posts (newest first):');
-      posts.slice(0, 5).forEach((post, index) => {
-        logger.info(`  ${index + 1}. "${post.message}" by ${toHex(post.user_hash).slice(0, 8)}... (ID: ${post.id})`);
+    // Display votes
+    const votes = Array.from(ledgerState.votes);
+    logger.info(`Total votes cast: ${votes.length}`);
+    
+    if (votes.length > 0) {
+      logger.info('Recent votes (newest first):');
+      votes.slice(0, 5).forEach((vote, index) => {
+        const voteType = vote.vote_type ? 'FOR' : 'AGAINST';
+        logger.info(`  ${index + 1}. ${voteType} by ${toHex(vote.voter_hash).slice(0, 8)}...`);
       });
       
-      if (posts.length > 5) {
-        logger.info(`  ... and ${posts.length - 5} more posts`);
+      if (votes.length > 5) {
+        logger.info(`  ... and ${votes.length - 5} more votes`);
       }
     }
     
-    // Display authors
-    const authorsArray = Array.from(ledgerState.authors);
-    logger.info(`Total unique authors: ${authorsArray.length}`);
+    // Display comments
+    const comments = Array.from(ledgerState.comments);
+    if (comments.length > 0) {
+      logger.info(`Total comments: ${comments.length}`);
+      logger.info('Recent comments (newest first):');
+      comments.slice(0, 3).forEach((comment, index) => {
+        logger.info(`  ${index + 1}. "${comment.comment}" by ${toHex(comment.commenter_hash).slice(0, 8)}...`);
+      });
+      
+      if (comments.length > 3) {
+        logger.info(`  ... and ${comments.length - 3} more comments`);
+      }
+    }
+    
+    // Display voter registry
+    const voterCount = ledgerState.voter_registry.size();
+    logger.info(`Total unique voters: ${voterCount}`);
   }
 };
 
@@ -179,38 +209,57 @@ const displayPrivateState = async (providers: BBoardProviders, logger: Logger): 
 
 const displayDerivedState = (ledgerState: BBoardDerivedState | undefined, logger: Logger) => {
   if (ledgerState === undefined) {
-    logger.info(`No bulletin board state currently available`);
+    logger.info(`No voting contract state currently available`);
   } else {
     logger.info(`Current sequence is: ${ledgerState.sequence}`);
-    logger.info(`Total posts: ${ledgerState.postCount}`);
-    logger.info(`Total authors: ${ledgerState.authorCount}`);
+    logger.info(`Total votes: ${ledgerState.voteCount}`);
+    logger.info(`Total comments: ${ledgerState.commentCount}`);
+    logger.info(`Total voters: ${ledgerState.voterCount}`);
     logger.info(`You are ${ledgerState.isAuthority ? 'the authority' : 'not the authority'}`);
     
-    if (ledgerState.posts.length > 0) {
-      logger.info('Recent posts:');
-      ledgerState.posts.slice(0, 3).forEach((post, index) => {
-        logger.info(`  ${index + 1}. "${post.message}" (ID: ${post.id})`);
+    // Display proposal information
+    const proposal = ledgerState.proposal;
+    logger.info(`Proposal: "${proposal.description}" (ID: ${proposal.id})`);
+    logger.info(`Status: ${proposal.executed === 0 ? 'ACTIVE' : proposal.executed === 1 ? 'REJECTED' : 'PASSED'}`);
+    logger.info(`Votes - For: ${proposal.votes_for}, Against: ${proposal.votes_against}`);
+    logger.info(`Deadline: ${new Date(Number(proposal.deadline_timestamp) * 1000).toISOString()}`);
+    
+    if (ledgerState.votes.length > 0) {
+      logger.info('Recent votes:');
+      ledgerState.votes.slice(0, 3).forEach((vote, index) => {
+        const voteType = vote.vote_type ? 'FOR' : 'AGAINST';
+        logger.info(`  ${index + 1}. ${voteType} by ${toHex(vote.voter_hash).slice(0, 8)}...`);
       });
     } else {
-      logger.info('No posts yet');
+      logger.info('No votes cast yet');
+    }
+    
+    if (ledgerState.comments.length > 0) {
+      logger.info('Recent comments:');
+      ledgerState.comments.slice(0, 2).forEach((comment, index) => {
+        logger.info(`  ${index + 1}. "${comment.comment}" by ${toHex(comment.commenter_hash).slice(0, 8)}...`);
+      });
     }
   }
 };
 
 /* **********************************************************************
- * mainLoop: the main interactive menu of the bulletin board CLI.
+ * mainLoop: the main interactive menu of the voting contract CLI.
  * Before starting the loop, the user is prompted to deploy a new
  * contract or join an existing one.
  */
 
 const MAIN_LOOP_QUESTION = `
 You can do one of the following:
-  1. Post a message (with automatic credential)
-  2. Display the current ledger state (known by everyone)
-  3. Display the current private state (known only to this DApp instance)
-  4. Display the current derived state (known only to this DApp instance)
-  5. View all posts
-  6. Exit
+  1. Vote FOR the proposal (with automatic credential)
+  2. Vote AGAINST the proposal (with automatic credential)
+  3. Comment on the proposal (with automatic credential)
+  4. Execute proposal (authority only)
+  5. Display the current ledger state (known by everyone)
+  6. Display the current private state (known only to this DApp instance)
+  7. Display the current derived state (known only to this DApp instance)
+  8. View all votes and comments
+  9. Exit
 Which would you like to do? `;
 
 const mainLoop = async (providers: BBoardProviders, rli: Interface, logger: Logger): Promise<void> => {
@@ -228,9 +277,7 @@ const mainLoop = async (providers: BBoardProviders, rli: Interface, logger: Logg
       const choice = await rli.question(MAIN_LOOP_QUESTION);
       switch (choice) {
         case '1': {
-          const message = await rli.question(`What message do you want to post? `);
           const userIdentity = await rli.question(`Enter user identity (e.g., user@example.com): `);
-          const authorName = await rli.question(`Enter author display name: `);
           const livelinessInput = await rli.question(`Enter liveliness value (1-100, default 100): `);
           
           // Parse liveliness input with validation
@@ -244,67 +291,122 @@ const mainLoop = async (providers: BBoardProviders, rli: Interface, logger: Logg
             }
           }
           
-          logger.info(`📝 Posting message: "${message}"`);
+          logger.info(`✅ Voting FOR proposal`);
           logger.info(`👤 User identity: ${userIdentity}`);
-          logger.info(`✍️  Author name: ${authorName}`);
           logger.info(`💯 Liveliness: ${liveliness}`);
           
           try {
             logger.info(`🔐 Creating authority credential for user...`);
-            await bboardApi.authorizeAndPost(userIdentity, message, authorName, liveliness);
-            logger.info('✅ Message posted successfully!');
+            await bboardApi.authorizeAndVoteFor(userIdentity, liveliness);
+            logger.info('✅ Vote FOR submitted successfully!');
           } catch (error) {
-            logger.error(`❌ Failed to post message:`);
-            if (error instanceof Error) {
-              logger.error(`   Error: ${error.message}`);
-              if (error.stack) {
-                logger.debug(`   Stack trace: ${error.stack}`);
-              }
-              
-              // Parse proof server errors for more details
-              if (error.message.includes('Failed Proof Server response')) {
-                logger.error(`🚫 Proof Server Error Details:`);
-                logger.error(`   This typically means the proof generation failed`);
-                logger.error(`   Common causes:`);
-                logger.error(`   - Circuit compilation issues`);
-                logger.error(`   - Invalid witness data`);
-                logger.error(`   - Signature verification failures`);
-                logger.error(`   - Constraint violations in the circuit`);
-                logger.error(`   - Missing or incorrect contract state`);
-                
-                // Check if it's a 400 Bad Request
-                if (error.message.includes('code="400"')) {
-                  logger.error(`   HTTP 400 suggests malformed request or circuit error`);
-                }
-              }
+            logger.error(`❌ Failed to vote FOR: ${error}`);
+          }
+          break;
+        }
+        case '2': {
+          const userIdentity = await rli.question(`Enter user identity (e.g., user@example.com): `);
+          const livelinessInput = await rli.question(`Enter liveliness value (1-100, default 100): `);
+          
+          // Parse liveliness input with validation
+          let liveliness = BigInt(100); // Default value
+          if (livelinessInput.trim()) {
+            const parsed = parseInt(livelinessInput.trim());
+            if (isNaN(parsed) || parsed < 1 || parsed > 100) {
+              logger.warn(`Invalid liveliness value "${livelinessInput}". Using default value 100.`);
             } else {
-              logger.error(`   Unknown error type: ${error}`);
+              liveliness = BigInt(parsed);
+            }
+          }
+          
+          logger.info(`❌ Voting AGAINST proposal`);
+          logger.info(`👤 User identity: ${userIdentity}`);
+          logger.info(`💯 Liveliness: ${liveliness}`);
+          
+          try {
+            logger.info(`🔐 Creating authority credential for user...`);
+            await bboardApi.authorizeAndVoteAgainst(userIdentity, liveliness);
+            logger.info('✅ Vote AGAINST submitted successfully!');
+          } catch (error) {
+            logger.error(`❌ Failed to vote AGAINST: ${error}`);
+          }
+          break;
+        }
+        case '3': {
+          const userIdentity = await rli.question(`Enter user identity (e.g., user@example.com): `);
+          const commentText = await rli.question(`Enter your comment: `);
+          const livelinessInput = await rli.question(`Enter liveliness value (1-100, default 100): `);
+          
+          // Parse liveliness input with validation
+          let liveliness = BigInt(100); // Default value
+          if (livelinessInput.trim()) {
+            const parsed = parseInt(livelinessInput.trim());
+            if (isNaN(parsed) || parsed < 1 || parsed > 100) {
+              logger.warn(`Invalid liveliness value "${livelinessInput}". Using default value 100.`);
+            } else {
+              liveliness = BigInt(parsed);
+            }
+          }
+          
+          logger.info(`💬 Commenting on proposal`);
+          logger.info(`👤 User identity: ${userIdentity}`);
+          logger.info(`📝 Comment: "${commentText}"`);
+          logger.info(`💯 Liveliness: ${liveliness}`);
+          
+          try {
+            logger.info(`🔐 Creating authority credential for user...`);
+            await bboardApi.authorizeAndComment(userIdentity, commentText, liveliness);
+            logger.info('✅ Comment submitted successfully!');
+          } catch (error) {
+            logger.error(`❌ Failed to comment: ${error}`);
+          }
+          break;
+        }
+        case '4': {
+          logger.info(`⚖️ Executing proposal (authority only)`);
+          
+          try {
+            await bboardApi.executeProposal();
+            logger.info('✅ Proposal executed successfully!');
+          } catch (error) {
+            logger.error(`❌ Failed to execute proposal: ${error}`);
+          }
+          break;
+        }
+        case '5':
+          await displayLedgerState(providers, bboardApi.deployedContract, logger);
+          break;
+        case '6':
+          await displayPrivateState(providers, logger);
+          break;
+        case '7':
+          displayDerivedState(currentState, logger);
+          break;
+        case '8': {
+          const votes = bboardApi.getVotes();
+          const comments = bboardApi.getComments();
+          
+          if (votes.length === 0 && comments.length === 0) {
+            logger.info('No votes or comments yet');
+          } else {
+            if (votes.length > 0) {
+              logger.info(`All votes (${votes.length} total):`);
+              votes.forEach((vote, index) => {
+                const voteType = vote.vote_type ? 'FOR' : 'AGAINST';
+                logger.info(`${index + 1}. ${voteType} by ${toHex(vote.voter_hash).slice(0, 8)}... (Proposal: ${vote.proposal_id})`);
+              });
+            }
+            
+            if (comments.length > 0) {
+              logger.info(`All comments (${comments.length} total):`);
+              comments.forEach((comment, index) => {
+                logger.info(`${index + 1}. "${comment.comment}" by ${toHex(comment.commenter_hash).slice(0, 8)}... (Proposal: ${comment.proposal_id})`);
+              });
             }
           }
           break;
         }
-        case '2':
-          await displayLedgerState(providers, bboardApi.deployedContract, logger);
-          break;
-        case '3':
-          await displayPrivateState(providers, logger);
-          break;
-        case '4':
-          displayDerivedState(currentState, logger);
-          break;
-        case '5': {
-          const posts = bboardApi.getPosts();
-          if (posts.length === 0) {
-            logger.info('No posts available');
-          } else {
-            logger.info(`All posts (${posts.length} total):`);
-            posts.forEach((post, index) => {
-              logger.info(`${index + 1}. "${post.message}" by ${toHex(post.user_hash).slice(0, 8)}... (ID: ${post.id}, Time: ${post.timestamp})`);
-            });
-          }
-          break;
-        }
-        case '6':
+        case '9':
           logger.info('Exiting...');
           return;
         default:
@@ -468,7 +570,7 @@ const mapContainerPort = (env: StartedDockerComposeEnvironment, url: string, con
 };
 
 /* **********************************************************************
- * run: the main entry point that starts the whole bulletin board CLI.
+ * run: the main entry point that starts the whole voting contract CLI.
  *
  * If called with a Docker environment argument, the application
  * will wait for Docker to be ready before doing anything else.

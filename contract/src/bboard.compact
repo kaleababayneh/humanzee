@@ -9,7 +9,7 @@ export struct Proposal {
   id: Uint<64>;
   description: Opaque<"string">;
   proposer: Bytes<32>;
-  deadline_timestamp: Uint<64>;
+  deadline_timestamp: Uint<64>; // Unix timestamp in seconds (for blockTime functions)
   votes_for: Uint<64>;
   votes_against: Uint<64>;
   executed: Status;
@@ -20,7 +20,6 @@ export struct Vote {
   proposal_id: Uint<64>;
   voter_hash: Bytes<32>;
   vote_type: Boolean; // true = for, false = against
-  timestamp: Uint<64>;
 }
 
 // Comment on a proposal
@@ -28,7 +27,6 @@ export struct Comment {
   proposal_id: Uint<64>;
   commenter_hash: Bytes<32>;
   comment: Opaque<"string">;
-  timestamp: Uint<64>;
 }
 
 // Signature structure for authenticating actions
@@ -77,7 +75,7 @@ export ledger min_liveliness: Field;
 // Witnesses for private data
 witness localSecretKey(): Bytes<32>;
 
-constructor(_min_liveliness : Uint<64>, _proposer: Bytes<32>, description: Opaque<"string">, deadline_in_ms: Uint<64>) {
+constructor(_min_liveliness : Uint<64>, _proposer: Bytes<32>, description: Opaque<"string">, deadline_in_seconds: Uint<64>) {
   // Initialize with the deployer's public key as the authority
   const sk = disclose(localSecretKey());
   authority_pk = derive_pk(sk);
@@ -88,7 +86,7 @@ constructor(_min_liveliness : Uint<64>, _proposer: Bytes<32>, description: Opaqu
     id: sequence as Uint<64>,
     description: disclose(description),
     proposer: disclose(_proposer),
-    deadline_timestamp: disclose(deadline_in_ms),
+    deadline_timestamp: disclose(deadline_in_seconds),
     votes_for: 0 as Uint<64>,
     votes_against: 0 as Uint<64>,
     executed: Status.ACTIVE
@@ -209,7 +207,7 @@ export circuit voteFor(credential: AuthorityCredential): [] {
   
   // Check that proposal is still active and voting is open
   assert(proposal.executed == Status.ACTIVE, "Proposal is not active");
-  //assert(blockTimeLte(proposal.deadline_timestamp), "Voting deadline has passed");
+  assert(blockTimeLte(proposal.deadline_timestamp), "Voting deadline has passed");
   
   // Prevent double voting
   const voter_hash = disclose(credential.user_hash);
@@ -220,7 +218,6 @@ export circuit voteFor(credential: AuthorityCredential): [] {
     proposal_id: proposal.id,
     voter_hash: voter_hash,
     vote_type: true, // true = for
-    timestamp: 0 as Uint<64> // Block time will be automatically recorded
   };
   
   votes.pushFront(new_vote);
@@ -245,7 +242,7 @@ export circuit voteAgainst(credential: AuthorityCredential): [] {
   
   // Check that proposal is still active and voting is open
   assert(proposal.executed == Status.ACTIVE, "Proposal is not active");
-  //assert(blockTimeLte(proposal.deadline_timestamp), "Voting deadline has passed");
+  assert(blockTimeLte(proposal.deadline_timestamp), "Voting deadline has passed");
   
   // Prevent double voting
   const voter_hash = disclose(credential.user_hash);
@@ -256,7 +253,6 @@ export circuit voteAgainst(credential: AuthorityCredential): [] {
     proposal_id: proposal.id,
     voter_hash: voter_hash,
     vote_type: false, // false = against
-    timestamp: 0 as Uint<64> // Block time will be automatically recorded
   };
   
   votes.pushFront(new_vote);
@@ -287,7 +283,6 @@ export circuit commentOnProposal(commentText: Opaque<"string">, credential: Auth
     proposal_id: proposal.id,
     commenter_hash: disclose(credential.user_hash),
     comment: disclose(commentText),
-    timestamp: 0 as Uint<64> // Block time will be automatically recorded
   };
   
   comments.pushFront(new_comment);
@@ -301,7 +296,7 @@ export circuit executeProposal(): [] {
   assert(authority_pk_derived == authority_pk, "Only authority can execute proposals");
   
   // Check that voting deadline has passed
-  //assert(blockTimeGt(proposal.deadline_timestamp), "Voting deadline has not passed yet");
+  assert(blockTimeGt(proposal.deadline_timestamp), "Voting deadline has not passed yet");
   assert(proposal.executed == Status.ACTIVE, "Proposal has already been executed");
   
   // Determine result based on votes
@@ -342,10 +337,10 @@ export circuit hasUserVoted(userHash: Bytes<32>): Boolean {
 
 // Check if voting is still open
 export circuit isVotingOpen(): Boolean {
-  return proposal.executed == Status.ACTIVE;// && blockTimeLte(proposal.deadline_timestamp);
+  return proposal.executed == Status.ACTIVE && blockTimeLte(proposal.deadline_timestamp);
 }
 
 // Check if proposal has expired (past deadline)
 export circuit hasProposalExpired(): Boolean {
-  return false;// blockTimeGt(proposal.deadline_timestamp);
+  return blockTimeGt(proposal.deadline_timestamp);
 }

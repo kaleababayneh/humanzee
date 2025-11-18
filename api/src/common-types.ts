@@ -21,7 +21,7 @@
 
 import { type MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
 import { type FoundContract } from '@midnight-ntwrk/midnight-js-contracts';
-import type { Post, AuthorityCredential, BBoardPrivateState, Contract, Witnesses } from '../../contract/src/index';
+import type { Proposal, Vote, Comment, AuthorityCredential, BBoardPrivateState, Contract, Witnesses } from '../../contract/src/index';
 
 export const bboardPrivateStateKey = 'bboardPrivateState';
 export type PrivateStateId = typeof bboardPrivateStateKey;
@@ -61,7 +61,7 @@ export type BBoardContract = Contract<BBoardPrivateState, Witnesses<BBoardPrivat
  *
  * @public
  */
-export type BBoardCircuitKeys = 'issueCredential' | 'verify_credential' | 'post' | 'getAuthorityPk' | 'getSequence' | 'getPostCount' | 'getAuthorCount';
+export type BBoardCircuitKeys = 'issueCredential' | 'verify_credential' | 'voteFor' | 'voteAgainst' | 'commentOnProposal' | 'executeProposal' | 'getAuthorityPk' | 'getSequence' | 'getProposal' | 'getVoteCount' | 'getCommentCount' | 'hasUserVoted' | 'isVotingOpen' | 'hasProposalExpired';
 
 /**
  * The providers required by {@link BBoardContract}.
@@ -82,15 +82,18 @@ export type DeployedBBoardContract = FoundContract<BBoardContract>;
  */
 export type BBoardDerivedState = {
   readonly sequence: bigint;
-  readonly posts: Post[];
-  readonly postCount: bigint;
-  readonly authorCount: bigint;
+  readonly proposal: Proposal;
+  readonly votes: Vote[];
+  readonly comments: Comment[];
+  readonly voteCount: bigint;
+  readonly commentCount: bigint;
+  readonly voterCount: bigint;
 
   /**
    * A readonly flag that determines if the current user is the contract authority.
    *
    * @remarks
-   * The authority can issue credentials to users, allowing them to post messages.
+   * The authority can issue credentials to users, allowing them to vote and comment on proposals.
    */
   readonly isAuthority: boolean;
 };

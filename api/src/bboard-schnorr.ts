@@ -4,9 +4,9 @@ import {
   constructorContext,
 } from "@midnight-ntwrk/compact-runtime";
 
-import { Contract, pureCircuits } from "../../contract/src/schnorr/index.cjs";
+import { Contract, pureCircuits } from "../../contract/src/managed/bboard/contract/index.cjs";
 import { witnesses } from "../../contract/src/witnesses.js";
-import type { Signature, AuthorityCredential } from "../../contract/src/schnorr/index.d.cts";
+import type { Signature, AuthorityCredential } from "../../contract/src/managed/bboard/contract/index.d.cts";
 import { config } from './config.js';
 
 // Utility functions
@@ -60,9 +60,9 @@ Please check that config.ts contains a valid 64-character hex string.
 
 
 /**
- * Bulletin Board Authority Signer
+ * Voting Contract Authority Signer
  * 
- * Provides credential issuance for the bulletin board using the
+ * Provides credential issuance for the voting contract using the
  * authority's private key to sign user hashes.
  */
 export class BBoardAuthoritySigner {
@@ -74,6 +74,12 @@ export class BBoardAuthoritySigner {
     this.authoritySecretKey = authoritySecretKey || getAuthoritySecretKey();
     this.contract = new Contract(witnesses);
     
+    // Create default constructor arguments for the voting contract
+    const minLiveliness = BigInt(50);
+    const proposerBytes = new Uint8Array(32).fill(0x11); // Default proposer
+    const description = "Test proposal";
+    const deadlineInSeconds = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
+    
     // Initialize contract with authority secret key
     const {
       currentPrivateState,
@@ -81,6 +87,10 @@ export class BBoardAuthoritySigner {
       currentZswapLocalState,
     } = this.contract.initialState(
       constructorContext({ secretKey: this.authoritySecretKey }, "0".repeat(64)),
+      minLiveliness,
+      proposerBytes,
+      description,
+      deadlineInSeconds
     );
     
     this.circuitContext = {
@@ -158,54 +168,18 @@ export class BBoardAuthoritySigner {
   }
 
   /**
-   * Create author bytes from author ID
-   * 
-   * @param authorId Author identifier string
-   * @returns 132-byte author representation
-   */
-  createAuthorBytes(authorId: string): Uint8Array {
-    const encoder = new TextEncoder();
-    const encoded = encoder.encode(authorId);
-    const authorBytes = new Uint8Array(132);
-    
-    // Copy the author ID into the first part of the 132-byte array
-    for (let i = 0; i < Math.min(encoded.length, 132); i++) {
-      authorBytes[i] = encoded[i];
-    }
-    
-    return authorBytes;
-  }
-
-  /**
-   * Complete workflow: create credential and return all needed data for posting
-   * 
-   * @param userIdentity User identity string
-   * @param authorId Author name for display
-   * @returns Object with credential and author bytes ready for posting
-   */
-  preparePostingData(userIdentity: string, authorId: string, liveliness: bigint = BigInt(100)): {
-    credential: AuthorityCredential;
-    authorBytes: Uint8Array;
-    userHash: Uint8Array;
-  } {
-    const userHash = this.createUserHash(userIdentity);
-    const credential = this.createCredential(userHash, liveliness);
-    const authorBytes = this.createAuthorBytes(authorId);
-    
-    return {
-      credential,
-      authorBytes,
-      userHash,
-    };
-  }
-
-  /**
    * Switch to a different authority key (for testing)
    * 
    * @param newSecretKey New authority secret key
    */
   switchAuthorityKey(newSecretKey: Uint8Array): void {
     this.authoritySecretKey = newSecretKey;
+    
+    // Create default constructor arguments for the voting contract
+    const minLiveliness = BigInt(50);
+    const proposerBytes = new Uint8Array(32).fill(0x11); // Default proposer
+    const description = "Test proposal";
+    const deadlineInSeconds = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
     
     // Reinitialize contract with new key
     const {
@@ -214,6 +188,10 @@ export class BBoardAuthoritySigner {
       currentZswapLocalState,
     } = this.contract.initialState(
       constructorContext({ secretKey: newSecretKey }, "0".repeat(64)),
+      minLiveliness,
+      proposerBytes,
+      description,
+      deadlineInSeconds
     );
     
     this.circuitContext = {
@@ -262,13 +240,4 @@ export const createDefaultAuthoritySigner = (): BBoardAuthoritySigner => {
 export const issueCredentialForUser = (identity: string, authorityKey?: Uint8Array): AuthorityCredential => {
   const signer = createAuthoritySigner(authorityKey);
   return signer.createCredentialFromIdentity(identity);
-};
-
-export const prepareMessagePost = (userIdentity: string, authorId: string, authorityKey?: Uint8Array, liveliness: bigint = BigInt(100)): {
-  credential: AuthorityCredential;
-  authorBytes: Uint8Array;
-  userHash: Uint8Array;
-} => {
-  const signer = createAuthoritySigner(authorityKey);
-  return signer.preparePostingData(userIdentity, authorId, liveliness);
 };

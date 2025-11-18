@@ -11,8 +11,8 @@ import {
   bboardPrivateStateKey,
 } from './common-types.js';
 import { type BBoardPrivateState, createBBoardPrivateState, witnesses } from '../../contract/src/index';
-import type { Post, AuthorityCredential, Signature } from '../../contract/src/index';
-import { BBoardAuthoritySigner, prepareMessagePost } from './bboard-schnorr.js';
+import type { Proposal, Vote, Comment, AuthorityCredential, Signature } from '../../contract/src/index';
+import { BBoardAuthoritySigner } from './bboard-schnorr.js';
 import * as utils from './utils/index.js';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { combineLatest, map, tap, from, type Observable } from 'rxjs';
@@ -29,27 +29,39 @@ export interface DeployedBBoardAPI {
   issueCredential: (userHash: Uint8Array) => Promise<Signature>;
   
   // User operations
-  post: (message: string, timestamp: bigint, authorBytes: Uint8Array, credential: AuthorityCredential) => Promise<void>;
+  voteFor: (credential: AuthorityCredential) => Promise<void>;
+  voteAgainst: (credential: AuthorityCredential) => Promise<void>;
+  commentOnProposal: (commentText: string, credential: AuthorityCredential) => Promise<void>;
+  
+  // Authority-only operations
+  executeProposal: () => Promise<void>;
   
   // Helper functions
   createUserHash: (identity: string) => Uint8Array;
   createCredential: (userHash: Uint8Array, authoritySignature: Signature, liveliness?: bigint) => AuthorityCredential;
-  authorizeAndPost: (userIdentity: string, message: string, authorId: string, liveliness?: bigint) => Promise<void>;
+  authorizeAndVoteFor: (userIdentity: string, liveliness?: bigint) => Promise<void>;
+  authorizeAndVoteAgainst: (userIdentity: string, liveliness?: bigint) => Promise<void>;
+  authorizeAndComment: (userIdentity: string, commentText: string, liveliness?: bigint) => Promise<void>;
   
   // Query functions
-  getPosts: () => Post[];
+  getProposal: () => Promise<Proposal>;
+  getVotes: () => Vote[];
+  getComments: () => Comment[];
   getAuthorityPk: () => Promise<{ x: bigint, y: bigint }>;
+  hasUserVoted: (userHash: Uint8Array) => Promise<boolean>;
+  isVotingOpen: () => Promise<boolean>;
 }
 
 /**
- * Provides an implementation of {@link DeployedBBoardAPI} by adapting a deployed bulletin board
+ * Provides an implementation of {@link DeployedBBoardAPI} by adapting a deployed voting
  * contract with credential-based authorization.
  *
  * @remarks
- * The bulletin board now uses a credential-based authorization system where:
+ * The voting contract uses a credential-based authorization system where:
  * 1. The contract authority (deployer) can issue credentials to users
- * 2. Users must present valid credentials to post messages
- * 3. All posts are stored in a public list on the ledger
+ * 2. Users must present valid credentials to vote or comment on proposals
+ * 3. All votes and comments are stored in public lists on the ledger
+ * 4. Proposals have deadlines after which they can be executed by the authority
  */
 export class BBoardAPI implements DeployedBBoardAPI {
   /** @internal */
@@ -72,8 +84,9 @@ export class BBoardAPI implements DeployedBBoardAPI {
             logger?.trace({
               ledgerStateChanged: {
                 sequence: ledgerState.sequence,
-                postCount: Array.from(ledgerState.posts).length,
-                authorCount: ledgerState.authors.size(),
+                voteCount: Array.from(ledgerState.votes).length,
+                commentCount: Array.from(ledgerState.comments).length,
+                voterCount: ledgerState.voter_registry.size(),
               },
             });
           }),
@@ -83,8 +96,9 @@ export class BBoardAPI implements DeployedBBoardAPI {
       ],
       // ...and combine them to produce the required derived state.
       (ledgerState, privateState) => {
-        // Convert posts iterator to array
-        const posts: Post[] = Array.from(ledgerState.posts);
+        // Convert votes and comments iterators to arrays
+        const votes: Vote[] = Array.from(ledgerState.votes);
+        const comments: Comment[] = Array.from(ledgerState.comments);
         
         // Check if current user is the authority by comparing public keys
         const userPk = pureCircuits.derive_pk(privateState.secretKey);
@@ -93,9 +107,12 @@ export class BBoardAPI implements DeployedBBoardAPI {
 
         return {
           sequence: ledgerState.sequence,
-          posts,
-          postCount: ledgerState.posts.length(),
-          authorCount: ledgerState.authors.size(),
+          proposal: ledgerState.proposal,
+          votes,
+          comments,
+          voteCount: ledgerState.votes.length(),
+          commentCount: ledgerState.comments.length(),
+          voterCount: ledgerState.voter_registry.size(),
           isAuthority,
         };
       },
@@ -152,41 +169,101 @@ export class BBoardAPI implements DeployedBBoardAPI {
   }
 
   /**
-   * Posts a message to the bulletin board with a valid authority credential.
+   * Vote for the proposal with a valid authority credential.
    *
-   * @param message The message to post.
-   * @param timestamp The timestamp for the post.
-   * @param authorBytes The author identifier (132 bytes).
-   * @param credential The authority credential required for posting.
+   * @param credential The authority credential required for voting.
    */
-  async post(message: string, timestamp: bigint, authorBytes: Uint8Array, credential: AuthorityCredential): Promise<void> {
-    this.logger?.info(`📮 Posting message: "${message}" with timestamp: ${timestamp} and credential`);
-    this.logger?.info(`📏 Author bytes length: ${authorBytes.length} (expected: 132)`);
-    
-
+  async voteFor(credential: AuthorityCredential): Promise<void> {
+    this.logger?.info(`✅ Voting FOR proposal with credential`);
 
     try {
-      this.logger?.info(`🔄 Calling contract post transaction...`);
-      const txData = await this.deployedContract.callTx.post(message, timestamp, authorBytes, credential);
+      const txData = await this.deployedContract.callTx.voteFor(credential);
       
-      this.logger?.info(`✅ Transaction submitted successfully!`);
+      this.logger?.info(`✅ Vote FOR transaction submitted successfully!`);
       this.logger?.trace({
         transactionAdded: {
-          circuit: 'post',
+          circuit: 'voteFor',
           txHash: txData.public.txHash,
           blockHeight: txData.public.blockHeight,
         },
       });
     } catch (error) {
-      this.logger?.error(`❌ Failed to submit post transaction:`);
-      if (error instanceof Error) {
-        this.logger?.error(`   Error: ${error.message}`);
-        if (error.message.includes('Failed Proof Server response')) {
-          this.logger?.error(`🚫 Proof Server rejected the transaction`);
-          this.logger?.error(`   This means the proof generation or verification failed`);
-          this.logger?.error(`   The contract constraints were likely violated`);
-        }
-      }
+      this.logger?.error(`❌ Failed to submit vote FOR transaction: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Vote against the proposal with a valid authority credential.
+   *
+   * @param credential The authority credential required for voting.
+   */
+  async voteAgainst(credential: AuthorityCredential): Promise<void> {
+    this.logger?.info(`❌ Voting AGAINST proposal with credential`);
+
+    try {
+      const txData = await this.deployedContract.callTx.voteAgainst(credential);
+      
+      this.logger?.info(`✅ Vote AGAINST transaction submitted successfully!`);
+      this.logger?.trace({
+        transactionAdded: {
+          circuit: 'voteAgainst',
+          txHash: txData.public.txHash,
+          blockHeight: txData.public.blockHeight,
+        },
+      });
+    } catch (error) {
+      this.logger?.error(`❌ Failed to submit vote AGAINST transaction: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Comment on the proposal with a valid authority credential.
+   *
+   * @param commentText The comment text.
+   * @param credential The authority credential required for commenting.
+   */
+  async commentOnProposal(commentText: string, credential: AuthorityCredential): Promise<void> {
+    this.logger?.info(`💬 Commenting on proposal: "${commentText}" with credential`);
+
+    try {
+      const txData = await this.deployedContract.callTx.commentOnProposal(commentText, credential);
+      
+      this.logger?.info(`✅ Comment transaction submitted successfully!`);
+      this.logger?.trace({
+        transactionAdded: {
+          circuit: 'commentOnProposal',
+          txHash: txData.public.txHash,
+          blockHeight: txData.public.blockHeight,
+        },
+      });
+    } catch (error) {
+      this.logger?.error(`❌ Failed to submit comment transaction: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Execute the proposal (Authority only).
+   * Can only be called after the voting deadline has passed.
+   */
+  async executeProposal(): Promise<void> {
+    this.logger?.info(`⚖️ Executing proposal (authority only)`);
+
+    try {
+      const txData = await this.deployedContract.callTx.executeProposal();
+      
+      this.logger?.info(`✅ Proposal execution transaction submitted successfully!`);
+      this.logger?.trace({
+        transactionAdded: {
+          circuit: 'executeProposal',
+          txHash: txData.public.txHash,
+          blockHeight: txData.public.blockHeight,
+        },
+      });
+    } catch (error) {
+      this.logger?.error(`❌ Failed to execute proposal: ${error}`);
       throw error;
     }
   }
@@ -227,22 +304,15 @@ export class BBoardAPI implements DeployedBBoardAPI {
   }
 
   /**
-   * Complete workflow: Authority issues credential and user posts message.
+   * Complete workflow: Authority issues credential and user votes FOR the proposal.
    * 
    * Uses the authority signer to automatically handle credential issuance.
    *
    * @param userIdentity The user's identity string.
-   * @param message The message to post.
-   * @param authorName The author display name.
+   * @param liveliness The liveliness value (default: 100).
    */
-  async authorizeAndPost(userIdentity: string, message: string, authorName: string, liveliness: bigint = BigInt(100)): Promise<void> {
-    // HARDCODE LONGER VALUES TO AVOID ZERO BYTES IN HASH
-    //const actualUserIdentity = "kaleababayneh@example.com.test.user.identity.full.length.string.to.avoid.zero.bytes";
-    //const actualAuthorName = "kaleababayneh_full_author_name_to_fill_bytes";
-    
-    this.logger?.info(`⚠️  NOTE: Using hardcoded longer identity to avoid zero bytes in hash`);
-    this.logger?.info(`📝 Original input - User: "${userIdentity}", Author: "${authorName}", Liveliness: ${liveliness}`);
-    //this.logger?.info(`🔧 Actual values - User: "${actualUserIdentity}", Author: "${actualAuthorName}"`);
+  async authorizeAndVoteFor(userIdentity: string, liveliness: bigint = BigInt(100)): Promise<void> {
+    this.logger?.info(`📝 Authorizing user "${userIdentity}" to vote FOR proposal with liveliness: ${liveliness}`);
     
     try {
       // Get the current private state to use as authority key
@@ -251,92 +321,172 @@ export class BBoardAPI implements DeployedBBoardAPI {
         throw new Error("No private state available - cannot act as authority");
       }
       
-      this.logger?.info(`🔑 Using authority key: ${toHex(privateState.secretKey).slice(0, 16)}...`);
+      // Create user hash and issue credential
+      const userHash = this.createUserHash(userIdentity);
+      const authoritySignature = await this.issueCredential(userHash);
+      const credential = this.createCredential(userHash, authoritySignature, liveliness);
       
-      // Get current contract authority key for comparison
-      const contractAuthorityPk = await this.getAuthorityPk();
-      this.logger?.info(`📋 Contract authority pk: x=${contractAuthorityPk.x.toString(16).slice(0, 16)}..., y=${contractAuthorityPk.y.toString(16).slice(0, 16)}...`);
+      this.logger?.info(`✅ Created credential for user: ${userIdentity}`);
       
-      // Derive public key from our private key to compare
-      const localAuthorityPk = pureCircuits.derive_pk(privateState.secretKey);
-      this.logger?.info(`🔐 Local authority pk: x=${localAuthorityPk.x.toString(16).slice(0, 16)}..., y=${localAuthorityPk.y.toString(16).slice(0, 16)}...`);
+      // Vote for the proposal with the credential
+      await this.voteFor(credential);
       
-      // Check if they match
-      const keysMatch = localAuthorityPk.x === contractAuthorityPk.x && localAuthorityPk.y === contractAuthorityPk.y;
-      this.logger?.info(`🔗 Authority keys match: ${keysMatch ? '✅ YES' : '❌ NO'}`);
-      
-      if (!keysMatch) {
-        this.logger?.error(`⚠️  CRITICAL: Authority key mismatch detected!`);
-        this.logger?.error(`   This will cause 'pk != authority_pk' assertion failure`);
-        this.logger?.error(`   Contract expects: x=${contractAuthorityPk.x.toString(16)}, y=${contractAuthorityPk.y.toString(16)}`);
-        this.logger?.error(`   CLI is using:    x=${localAuthorityPk.x.toString(16)}, y=${localAuthorityPk.y.toString(16)}`);
-      }
-      
-      // Use the authority signer to prepare posting data with hardcoded longer values and custom liveliness
-      const postingData = prepareMessagePost(userIdentity, authorName, privateState.secretKey, liveliness);
-      
-      //this.logger?.info(`✅ Created credential for user: ${actualUserIdentity} with liveliness: ${liveliness}`);
-      this.logger?.info(`📊 Credential details:`);
-      this.logger?.info(`   👤 User hash: ${toHex(postingData.userHash)}`);
-      this.logger?.info(`   ✍️  Author bytes (132): ${toHex(postingData.authorBytes.slice(0, 20))}...`);
-      this.logger?.info(`   🔐 Authority signature:`);
-      this.logger?.info(`      pk.x: ${postingData.credential.authority_signature.pk.x.toString(16).slice(0, 16)}...`);
-      this.logger?.info(`      pk.y: ${postingData.credential.authority_signature.pk.y.toString(16).slice(0, 16)}...`);
-      this.logger?.info(`      R.x: ${postingData.credential.authority_signature.R.x.toString(16).slice(0, 16)}...`);
-      this.logger?.info(`      R.y: ${postingData.credential.authority_signature.R.y.toString(16).slice(0, 16)}...`);
-      this.logger?.info(`      s: ${postingData.credential.authority_signature.s.toString(16).slice(0, 16)}...`);
-      this.logger?.info(`      nonce: ${toHex(postingData.credential.authority_signature.nonce).slice(0, 16)}...`);
-      
-      // Check if signature public key matches contract authority
-      const sigPkMatchesContract = postingData.credential.authority_signature.pk.x === contractAuthorityPk.x && 
-                                   postingData.credential.authority_signature.pk.y === contractAuthorityPk.y;
-      this.logger?.info(`🔐 Signature pk matches contract: ${sigPkMatchesContract ? '✅ YES' : '❌ NO'}`);
-      
-      this.logger?.info(`📝 Posting message: "${message}" with credential`);
-      
-      // Post the message with the credential (include current timestamp)
-      const currentTimestamp = BigInt(Math.floor(Date.now() / 1000)); // Current Unix timestamp
-      await this.post(message, currentTimestamp, postingData.authorBytes, postingData.credential);
-      
-      //this.logger?.info(`🎉 Successfully posted message for user: ${actualUserIdentity}`);
+      this.logger?.info(`🎉 Successfully voted FOR proposal for user: ${userIdentity}`);
       
     } catch (error) {
-      this.logger?.error(`❌ Failed to authorize and post: ${error}`);
-      
-      // Add more detailed error analysis
-      if (error instanceof Error) {
-        if (error.message.includes('Failed Proof Server response')) {
-          this.logger?.error(`🚫 Proof Server Details:`);
-          this.logger?.error(`   Message: ${error.message}`);
-          this.logger?.error(`   This suggests a circuit constraint violation or malformed proof request`);
-        }
-        
-        if (error.message.includes('assertion failed') || error.message.includes('pk != authority_pk')) {
-          this.logger?.error(`⚠️  Contract Assertion Failed - Authority Key Mismatch:`);
-          this.logger?.error(`   This is exactly the 'pk != authority_pk' assertion we expected!`);
-          this.logger?.error(`   The credential was signed with a different key than the contract authority`);
-        }
-        
-        if (error.message.includes('Credential not signed by authority')) {
-          this.logger?.error(`⚠️  Contract Assertion: 'Credential not signed by authority'`);
-          this.logger?.error(`   This confirms the authority key mismatch theory`);
-        }
-      }
-      
+      this.logger?.error(`❌ Failed to authorize and vote FOR: ${error}`);
       throw error;
     }
   }
 
   /**
-   * Gets all posts from the current ledger state.
+   * Complete workflow: Authority issues credential and user votes AGAINST the proposal.
+   * 
+   * Uses the authority signer to automatically handle credential issuance.
    *
-   * @returns An array of all posts.
+   * @param userIdentity The user's identity string.
+   * @param liveliness The liveliness value (default: 100).
    */
-  getPosts(): Post[] {
+  async authorizeAndVoteAgainst(userIdentity: string, liveliness: bigint = BigInt(100)): Promise<void> {
+    this.logger?.info(`� Authorizing user "${userIdentity}" to vote AGAINST proposal with liveliness: ${liveliness}`);
+    
+    try {
+      // Get the current private state to use as authority key
+      const privateState = await this.providers.privateStateProvider.get(bboardPrivateStateKey);
+      if (!privateState) {
+        throw new Error("No private state available - cannot act as authority");
+      }
+      
+      // Create user hash and issue credential
+      const userHash = this.createUserHash(userIdentity);
+      const authoritySignature = await this.issueCredential(userHash);
+      const credential = this.createCredential(userHash, authoritySignature, liveliness);
+      
+      this.logger?.info(`✅ Created credential for user: ${userIdentity}`);
+      
+      // Vote against the proposal with the credential
+      await this.voteAgainst(credential);
+      
+      this.logger?.info(`🎉 Successfully voted AGAINST proposal for user: ${userIdentity}`);
+      
+    } catch (error) {
+      this.logger?.error(`❌ Failed to authorize and vote AGAINST: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Complete workflow: Authority issues credential and user comments on the proposal.
+   * 
+   * Uses the authority signer to automatically handle credential issuance.
+   *
+   * @param userIdentity The user's identity string.
+   * @param commentText The comment text.
+   * @param liveliness The liveliness value (default: 100).
+   */
+  async authorizeAndComment(userIdentity: string, commentText: string, liveliness: bigint = BigInt(100)): Promise<void> {
+    this.logger?.info(`📝 Authorizing user "${userIdentity}" to comment on proposal with liveliness: ${liveliness}`);
+    
+    try {
+      // Get the current private state to use as authority key
+      const privateState = await this.providers.privateStateProvider.get(bboardPrivateStateKey);
+      if (!privateState) {
+        throw new Error("No private state available - cannot act as authority");
+      }
+      
+      // Create user hash and issue credential
+      const userHash = this.createUserHash(userIdentity);
+      const authoritySignature = await this.issueCredential(userHash);
+      const credential = this.createCredential(userHash, authoritySignature, liveliness);
+      
+      this.logger?.info(`✅ Created credential for user: ${userIdentity}`);
+      
+      // Comment on the proposal with the credential
+      await this.commentOnProposal(commentText, credential);
+      
+      this.logger?.info(`🎉 Successfully commented on proposal for user: ${userIdentity}`);
+      
+    } catch (error) {
+      this.logger?.error(`❌ Failed to authorize and comment: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Gets the current proposal.
+   *
+   * @returns The proposal from the contract.
+   */
+  async getProposal(): Promise<Proposal> {
+    if (this.currentLedgerState) {
+      return this.currentLedgerState.proposal;
+    }
+    
+    // Fallback: query the contract state directly
+    const contractState = await this.providers.publicDataProvider.queryContractState(this.deployedContractAddress);
+    if (contractState) {
+      const ledgerState = ledger(contractState.data);
+      return ledgerState.proposal;
+    }
+    
+    throw new Error("Unable to get proposal");
+  }
+
+  /**
+   * Gets all votes from the current ledger state.
+   *
+   * @returns An array of all votes.
+   */
+  getVotes(): Vote[] {
     if (!this.currentLedgerState) {
       return [];
     }
-    return Array.from(this.currentLedgerState.posts);
+    return Array.from(this.currentLedgerState.votes);
+  }
+
+  /**
+   * Gets all comments from the current ledger state.
+   *
+   * @returns An array of all comments.
+   */
+  getComments(): Comment[] {
+    if (!this.currentLedgerState) {
+      return [];
+    }
+    return Array.from(this.currentLedgerState.comments);
+  }
+
+  /**
+   * Checks if a user has voted.
+   *
+   * @param userHash The user's hash to check.
+   * @returns Whether the user has voted.
+   */
+  async hasUserVoted(userHash: Uint8Array): Promise<boolean> {
+    if (this.currentLedgerState) {
+      return this.currentLedgerState.voter_registry.member(userHash);
+    }
+    
+    // Fallback: query the contract state directly
+    const contractState = await this.providers.publicDataProvider.queryContractState(this.deployedContractAddress);
+    if (contractState) {
+      const ledgerState = ledger(contractState.data);
+      return ledgerState.voter_registry.member(userHash);
+    }
+    
+    return false;
+  }
+
+  /**
+   * Checks if voting is still open.
+   *
+   * @returns Whether voting is still open.
+   */
+  async isVotingOpen(): Promise<boolean> {
+    // For now, check if proposal status is ACTIVE (0)
+    // In production, this would also check block time vs deadline
+    const proposal = await this.getProposal();
+    return proposal.executed === 0; // 0 = Status.ACTIVE
   }
 
   /**
@@ -360,26 +510,49 @@ export class BBoardAPI implements DeployedBBoardAPI {
   }
 
   /**
-   * Deploys a new bulletin board contract to the network.
+   * Deploys a new voting contract to the network.
    *
    * @param providers The bulletin board providers.
+   * @param minLiveliness Minimum liveliness required for credentials (default: 50).
+   * @param proposalDescription Description of the initial proposal.
+   * @param deadlineInSeconds Unix timestamp (in seconds) when voting closes.
    * @param logger An optional 'pino' logger to use for logging.
    * @returns A `Promise` that resolves with a {@link BBoardAPI} instance that manages the newly deployed
    * {@link DeployedBBoardContract}; or rejects with a deployment error.
    */
-  static async deploy(providers: BBoardProviders, logger?: Logger): Promise<BBoardAPI> {
+  static async deploy(
+    providers: BBoardProviders, 
+    minLiveliness: bigint = BigInt(50),
+    proposalDescription: string = "Default governance proposal",
+    deadlineInSeconds: bigint = BigInt(Math.floor(Date.now() / 1000) + 3600), // 1 hour from now
+    logger?: Logger
+  ): Promise<BBoardAPI> {
     logger?.info('deployContract');
 
-    // EXERCISE 5: FILL IN THE CORRECT ARGUMENTS TO deployContract
+    // Get private state to determine authority/proposer
+    const privateState = await BBoardAPI.getPrivateState(providers);
+    const authorityPk = pureCircuits.derive_pk(privateState.secretKey);
+    
+    // Use authority public key as proposer (32 bytes from x coordinate)
+    const proposerBytes = new Uint8Array(32);
+    const pkBytes = authorityPk.x.toString(16).padStart(64, '0');
+    for (let i = 0; i < 32; i++) {
+      proposerBytes[i] = parseInt(pkBytes.substr(i * 2, 2), 16);
+    }
+
     const deployedBBoardContract = await deployContract<typeof bboardContractInstance>(providers, {
       privateStateId: bboardPrivateStateKey,
       contract: bboardContractInstance,
-      initialPrivateState: await BBoardAPI.getPrivateState(providers),
+      initialPrivateState: privateState,
+      args: [minLiveliness, proposerBytes, proposalDescription, deadlineInSeconds],
     });
 
     logger?.trace({
       contractDeployed: {
         finalizedDeployTxData: deployedBBoardContract.deployTxData.public,
+        proposalDescription,
+        deadlineInSeconds: deadlineInSeconds.toString(),
+        minLiveliness: minLiveliness.toString(),
       },
     });
 
