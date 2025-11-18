@@ -35,6 +35,7 @@ export const detectSingleFace = async (
       .withFaceDescriptor();
 
     if (detection) {
+      /*
       console.log('🎭 FACE DETECTION RESULT:', {
         descriptorLength: detection.descriptor.length,
         confidence: detection.detection.score,
@@ -47,8 +48,11 @@ export const detectSingleFace = async (
         landmarksCount: detection.landmarks.positions.length,
         descriptorPreview: Array.from(detection.descriptor.slice(0, 10)).map(v => v.toFixed(3))
       });
+      */
     } else {
+      /*
       console.log('❌ No face detected in current frame');
+      */
     }
 
     return detection;
