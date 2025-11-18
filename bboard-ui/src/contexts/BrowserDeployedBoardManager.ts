@@ -187,8 +187,14 @@ export class BrowserDeployedBoardManager implements DeployedBoardAPIProvider {
       const providers = await this.getProviders();
       console.log('✅ Providers initialized, calling BBoardAPI.deploy...');
       
-      // First try with a shorter timeout to fail fast if there are network issues
-      const deploymentPromise = BBoardAPI.deploy(providers, this.logger);
+      // Deploy with proper parameters for the voting contract
+      const deploymentPromise = BBoardAPI.deploy(
+        providers, 
+        BigInt(50), // minLiveliness 
+        "Default governance proposal", // proposalDescription
+        BigInt(Math.floor(Date.now() / 1000) + 3600), // deadline in seconds (1 hour from now)
+        this.logger
+      );
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => {
           reject(new Error('Contract deployment timed out after 120 seconds. This usually indicates network connectivity issues or the Midnight TestNet services are temporarily unavailable. Please try again later or check your internet connection.'));
